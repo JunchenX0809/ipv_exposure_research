@@ -1,0 +1,14 @@
+# Lightweight notebook stack for .dta (Stata) analysis
+jupyter>=1.0.0
+python-dotenv>=1.0.0
+ipykernel>=6.0.0
+pandas>=2.0.0
+pyreadstat>=1.2.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+python-docx>=1.0.0
+pymupdf>=1.23.0
+# Google Earth Engine Python client (see https://github.com/google/earthengine-api).
+# To upgrade only this package: pip install earthengine-api --upgrade
+# To upgrade everything in this file: pip install -r requirements.txt --upgrade
+earthengine-api>=0.1.384
