@@ -21,6 +21,8 @@ from pathlib import Path
 import ee
 import pandas as pd
 
+from utils.repo_paths import find_repo_root
+
 HANSEN_IMAGE_ID = "UMD/hansen/global_forest_change_2025_v1_13"
 GAUL_LEVEL2 = "FAO/GAUL/2015/level2"
 GAUL_LEVEL2_SIMPLIFIED = "FAO/GAUL_SIMPLIFIED_500m/2015/level2"
@@ -170,18 +172,6 @@ def summarize_loss_area_ha(
         props["_lossyear_band_value"] = lossyear_value_for_calendar_year(calendar_year)
         rows.append(props)
     return pd.DataFrame(rows)
-
-
-def find_repo_root(start: Path | None = None) -> Path:
-    cwd = (start or Path.cwd()).resolve()
-    if cwd.name == "exposure_notebooks":
-        parent = cwd.parent
-        if (parent / "gee_zambia").is_dir():
-            return parent
-    for d in [cwd, *cwd.parents][:20]:
-        if (d / "gee_zambia").is_dir() and (d / "data" / "raw").is_dir():
-            return d
-    return cwd
 
 
 def run_zambia_hansen_loss_demo(

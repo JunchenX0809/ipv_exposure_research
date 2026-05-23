@@ -1,6 +1,6 @@
 # Google Earth Engine (Zambia demos)
 
-**Beginner walkthrough:** open [`exposure_notebooks/zambia_gee_v2.ipynb`](../exposure_notebooks/zambia_gee_v2.ipynb) for auth checks and tiny “hello raster” samples before running the scripts below.
+**Beginner walkthrough:** open [`exposure_notebooks/zambia_gee_v2.ipynb`](../exposure_notebooks/zambia_gee_v2.ipynb) for auth checks and tiny “hello raster” samples before running the scripts below. Fire EDA: [`zambia_gee_v3.ipynb`](../exposure_notebooks/zambia_gee_v3.ipynb) (Zambia), [`zimbabwe_gee_v1.ipynb`](../exposure_notebooks/zimbabwe_gee_v1.ipynb) (Zimbabwe 2017 pilot).
 
 ## One-time access
 
@@ -41,3 +41,7 @@ If you see `Please authorize access to your Earth Engine account`, complete **Au
 Optional: `python -m gee_zambia.hansen_zonal --year 2013 --output /path/to/out.csv`
 
 If `reduceRegions` times out, try again (EE load) or use `--simplified` (coarser GAUL geometries).
+
+## Country filter (GAUL)
+
+How the notebooks scope to **Zambia** (or another country) in one line: see [`GEE_country_scope.md`](GEE_country_scope.md).
