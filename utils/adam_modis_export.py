@@ -158,7 +158,7 @@ def to_adam_modis_wide_columns(
     df["adm0_pcode"] = adm0_pcode
     df["adm1_name"] = df["ADM1_NAME"]
     df["adm2_name"] = df["ADM2_NAME"]
-    # GAUL codes (Kenya file uses HDX GADM pcodes; these are GAUL ADM codes as strings)
+    # Boundary-source codes on the regions FC (GAUL ADM*_CODE or GADM ID_1 / ID_2 as strings)
     if "ADM1_CODE" in df.columns:
         df["adm1_pcode"] = df["ADM1_CODE"].astype(str)
     else:

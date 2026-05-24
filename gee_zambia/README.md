@@ -1,47 +1,67 @@
-# Google Earth Engine (Zambia demos)
+# Google Earth Engine (this folder)
 
-**Beginner walkthrough:** open [`exposure_notebooks/zambia_gee_v2.ipynb`](../exposure_notebooks/zambia_gee_v2.ipynb) for auth checks and tiny “hello raster” samples before running the scripts below. Fire EDA: [`zambia_gee_v3.ipynb`](../exposure_notebooks/zambia_gee_v3.ipynb) (Zambia), [`zimbabwe_gee_v1.ipynb`](../exposure_notebooks/zimbabwe_gee_v1.ipynb) (Zimbabwe 2017 pilot).
+**`hansen_zonal.py`** — CLI zonal sum of Hansen forest **loss** to Zambia **GAUL 2015** admin‑2.  
+**Notebooks** — fire / MODIS / FIRMS live under [`exposure_notebooks/`](../exposure_notebooks/) (not here).
 
-## One-time access
+| Notebook | Country | Boundaries |
+|----------|---------|------------|
+| [`zambia_gee_v2.ipynb`](../exposure_notebooks/zambia_gee_v2.ipynb) | Zambia | EE auth smoke tests |
+| [`zambia_gee_v3.ipynb`](../exposure_notebooks/zambia_gee_v3.ipynb) | Zambia | **FAO GAUL 2015** level 2 |
+| [`zimbabwe_gee_v1.ipynb`](../exposure_notebooks/zimbabwe_gee_v1.ipynb) | Zimbabwe | **GADM 4.0** local GeoJSON via [`utils/gadm_boundaries`](../utils/gadm_boundaries.py) |
 
-1. Register for Earth Engine: [Earth Engine signup](https://code.earthengine.google.com/register) (Google account; research / nonprofit use is standard).
-2. Install deps: `pip install -r requirements.txt` (includes `earthengine-api`, which provides **`import ee`** and the **`earthengine`** CLI). Install into the **same Python** you use for notebooks (e.g. from repo root: `source .venv/bin/activate` then `pip install -r requirements.txt`). If you see **`ModuleNotFoundError: No module named 'ee'`**, your shell is using a different interpreter (often conda **`(base)`**) than the venv where packages were installed—activate that venv or run **`.venv/bin/python -m gee_zambia.hansen_zonal`**.
-3. Authenticate the Python API on this machine (with that same environment active):
+Full repo orchestration: [`README.md`](../README.md). GADM MODIS walkthrough: [`howto_docs/modis_gadm_country_pipeline.md`](../howto_docs/modis_gadm_country_pipeline.md).
 
-   ```bash
-   earthengine authenticate
-   ```
+## Orchestration
 
-   Follow the browser flow. See also: [Python install & auth](https://developers.google.com/earth-engine/guides/python_install).
+```mermaid
+flowchart TB
+  subgraph zambia_gaul ["Zambia — GAUL in EE catalog"]
+    H["gee_zambia/hansen_zonal.py"]
+    Z3["zambia_gee_v3.ipynb"]
+    GAUL["FAO/GAUL/2015/level2\nfilter ADM0_NAME=Zambia"]
+    H --> GAUL
+    Z3 --> GAUL
+  end
 
-4. Set **`EARTHENGINE_PROJECT`** to your GCP **project id** (the string id, not the numeric project number), e.g. `export EARTHENGINE_PROJECT=my-project-id`, or put that line in the repository root **`.env`** file — `hansen_zonal` loads `.env` automatically when `python-dotenv` is installed.
+  subgraph zimbabwe_gadm ["Zimbabwe — GADM local files"]
+    ZW["zimbabwe_gee_v1.ipynb"]
+    JSON["data/raw/gadm/4.0/\ngadm40_ZWE_*.json"]
+    GB["utils/gadm_boundaries"]
+    ZW --> GB
+    JSON --> GB
+  end
 
-5. Optional: if your organization uses a **service account**, set `GOOGLE_APPLICATION_CREDENTIALS` to the JSON path and call `ee.Initialize(project='your-cloud-project-id')` (see Google’s EE service account docs).
+  subgraph shared ["Shared utils + outputs"]
+    VACS["VACS_survey_time.csv"]
+    U["utils: vacs_survey_time\ngee_fire_zonal\nadam_modis_export"]
+    GEE["Earth Engine\nHansen / MCD64A1 / FIRMS"]
+    OUT["data/processed/\n*.csv"]
+  end
 
-## Run Hansen admin-2 loss summary (writes CSV)
-
-From the **repository root** (so `.env` is found), with the same Python env as `earthengine-api`:
-
-```bash
-python -m gee_zambia.hansen_zonal --year 2013
+  VACS --> Z3
+  VACS --> ZW
+  GAUL --> U
+  GB --> U
+  H --> GEE
+  U --> GEE
+  U --> OUT
 ```
 
-If `EARTHENGINE_PROJECT` is not in the environment or `.env`, pass the Cloud **project id** explicitly:
+**Zambia today:** boundaries = GAUL; Hansen CSV default `data/raw/exposure_gee/zambia/hansen_loss_y2013_admin2_zambia.csv`.  
+**Zimbabwe POC:** boundaries = GADM 4.0; MODIS deliverable `data/processed/zimbabwe_modis_mcd64_gadm40_2016.csv` (`ISO_2` = GADM `ID_2`).  
+**Planned alignment:** same GADM 4.0 pattern for other countries (download `gadm40_{ID_0}_*.json` into `data/raw/gadm/4.0/`) — see howto doc.
 
-```bash
-python -m gee_zambia.hansen_zonal --year 2013 --project ipv-exposure-research
-```
+## One-time Earth Engine access
 
-**Shell tip:** do not put `# comments` on the same line as `earthengine ...` — the CLI will treat them as arguments and error.
+1. [Earth Engine signup](https://code.earthengine.google.com/register)
+2. `pip install -r requirements.txt` (same Python as notebooks / venv)
+3. `earthengine authenticate`
+4. Set **`EARTHENGINE_PROJECT`** in `.env` at repo root (or export it)
 
-Output default: `data/raw/exposure_gee/zambia/hansen_loss_y2013_admin2_zambia.csv`
+Details: [Python install & auth](https://developers.google.com/earth-engine/guides/python_install). If `ModuleNotFoundError: No module named 'ee'`, activate `.venv` or use `.venv/bin/python -m gee_zambia.hansen_zonal`.
 
-If you see `Please authorize access to your Earth Engine account`, complete **Authenticate** above and rerun.
 
-Optional: `python -m gee_zambia.hansen_zonal --year 2013 --output /path/to/out.csv`
+## Country filter
 
-If `reduceRegions` times out, try again (EE load) or use `--simplified` (coarser GAUL geometries).
-
-## Country filter (GAUL)
-
-How the notebooks scope to **Zambia** (or another country) in one line: see [`GEE_country_scope.md`](GEE_country_scope.md).
+- **GAUL (Zambia / this script):** [`GEE_country_scope.md`](GEE_country_scope.md)  
+- **GADM (Zimbabwe / other countries):** local GeoJSON + `gadm_level2_feature_collection()` — not in the EE catalog
