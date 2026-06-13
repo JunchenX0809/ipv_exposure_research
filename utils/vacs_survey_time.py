@@ -16,6 +16,17 @@ import pandas as pd
 RANGE_SPLIT = re.compile(r"\s*(?:-|–|—|to)\s*", re.I)
 MONTH_NAME = "january|february|march|april|may|june|july|august|september|october|november|december"
 MONTH_PAIR_YEAR = re.compile(rf"(?i)^\s*({MONTH_NAME})\s*[-–—]\s*({MONTH_NAME})\s+(\d{{4}})\s*$")
+MONTH_YEAR_RANGE = re.compile(
+    rf"(?i)^\s*({MONTH_NAME})\s+(\d{{4}})\s*[-–—]\s*({MONTH_NAME})\s+(\d{{4}})\s*$"
+)
+MONTH_ABBR_YEAR = re.compile(r"(?i)^\s*([a-z]{3,9})\s*[-/]\s*(\d{2})\s*$")
+MONTH_ONLY_YEAR = re.compile(rf"(?i)^\s*({MONTH_NAME})\s+(\d{{4}})\s*$")
+
+# GADM boundary version vs end of 12-month pre-fieldwork exposure window (gadm.org guidance).
+GADM_VERSION_END_36 = date(2019, 3, 31)
+GADM_VERSION_START_40 = date(2019, 4, 1)
+GADM_VERSION_END_40 = date(2022, 2, 28)
+GADM_VERSION_START_41 = date(2022, 3, 1)
 
 
 def resolve_vacs_survey_time_csv(repo_root: Path) -> Path:
@@ -58,6 +69,75 @@ def split_range(s: str) -> tuple[str | None, str | None]:
     return s, None
 
 
+def _month_number(name: str) -> int:
+    key = name.strip().lower()
+    for i, full in enumerate(calendar.month_name):
+        if full and full.lower() == key:
+            return i
+    for i, abbr in enumerate(calendar.month_abbr):
+        if abbr and abbr.lower() == key[:3]:
+            return i
+    raise ValueError(f"Unknown month name: {name!r}")
+
+
+def _month_bounds(month_name: str, year: int) -> tuple[date, date]:
+    m = _month_number(month_name)
+    last = calendar.monthrange(year, m)[1]
+    return date(year, m, 1), date(year, m, last)
+
+
+def parse_month_year_range(raw_txt: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    """e.g. ``October 2018 – February 2019``."""
+    m = MONTH_YEAR_RANGE.match(raw_txt.strip())
+    if not m:
+        return None
+    start = _month_bounds(m.group(1), int(m.group(2)))[0]
+    end = _month_bounds(m.group(3), int(m.group(4)))[1]
+    return pd.Timestamp(start), pd.Timestamp(end)
+
+
+def parse_month_pair_single_year(raw_txt: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    """e.g. ``June–September 2018``, ``September–October 2013``."""
+    m = MONTH_PAIR_YEAR.match(raw_txt.strip())
+    if not m:
+        return None
+    year = int(m.group(3))
+    start = _month_bounds(m.group(1), year)[0]
+    end = _month_bounds(m.group(2), year)[1]
+    return pd.Timestamp(start), pd.Timestamp(end)
+
+
+def parse_month_abbr_year(raw_txt: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    """e.g. ``Jun-17`` → full month June 2017."""
+    m = MONTH_ABBR_YEAR.match(raw_txt.strip())
+    if not m:
+        return None
+    ts = pd.to_datetime(f"{m.group(1)}-{m.group(2)}", format="%b-%y", errors="coerce")
+    if pd.isna(ts):
+        return None
+    y, mo = int(ts.year), int(ts.month)
+    start = date(y, mo, 1)
+    end = date(y, mo, calendar.monthrange(y, mo)[1])
+    return pd.Timestamp(start), pd.Timestamp(end)
+
+
+def recommend_gadm_version(exposure_end: date) -> str:
+    """Recommend GADM release from exposure-window end (12 months before fieldwork).
+
+    Rules (gadm.org version guidance, summarized):
+    - ``3.6`` if exposure ends on or before 2019-03
+    - ``4.0`` if exposure ends 2019-04 through 2022-02
+    - ``4.1`` if exposure ends 2022-03 or later
+    """
+    if exposure_end <= GADM_VERSION_END_36:
+        return "3.6"
+    if exposure_end >= GADM_VERSION_START_41:
+        return "4.1"
+    if GADM_VERSION_START_40 <= exposure_end <= GADM_VERSION_END_40:
+        return "4.0"
+    return ""
+
+
 def try_parse_date(txt: str | None) -> pd.Timestamp:
     if txt is None or not str(txt).strip():
         return pd.NaT
@@ -81,22 +161,23 @@ def add_parsed_field_dates(survey_time: pd.DataFrame) -> pd.DataFrame:
             starts.append(pd.NaT)
             ends.append(pd.NaT)
             parse_flag.append("empty")
-        elif "june" in low and "september" in low:
-            starts.append(pd.NaT)
-            ends.append(pd.NaT)
-            parse_flag.append("month_name_range_manual")
-        elif re.match(r"^[a-z]+\s+\d{4}$", low):
-            starts.append(pd.NaT)
-            ends.append(pd.NaT)
-            parse_flag.append("month_year_only_manual")
-        elif "october" in low and "february" in low:
-            starts.append(pd.NaT)
-            ends.append(pd.NaT)
-            parse_flag.append("cross_year_month_manual")
-        elif MONTH_PAIR_YEAR.match(raw_txt):
-            starts.append(pd.NaT)
-            ends.append(pd.NaT)
-            parse_flag.append("month_name_pair_manual")
+        elif (parsed := parse_month_year_range(raw_txt)) is not None:
+            starts.append(parsed[0])
+            ends.append(parsed[1])
+            parse_flag.append("month_year_range_ok")
+        elif (parsed := parse_month_pair_single_year(raw_txt)) is not None:
+            starts.append(parsed[0])
+            ends.append(parsed[1])
+            parse_flag.append("month_pair_year_ok")
+        elif (parsed := parse_month_abbr_year(raw_txt)) is not None:
+            starts.append(parsed[0])
+            ends.append(parsed[1])
+            parse_flag.append("month_abbr_year_ok")
+        elif (moy := MONTH_ONLY_YEAR.match(raw_txt.strip())) is not None:
+            start, end = _month_bounds(moy.group(1), int(moy.group(2)))
+            starts.append(pd.Timestamp(start))
+            ends.append(pd.Timestamp(end))
+            parse_flag.append("month_only_year_ok")
         else:
             a, b = split_range(raw_txt)
             ts_a, ts_b = try_parse_date(a), try_parse_date(b)
@@ -201,3 +282,69 @@ def months_df_inclusive_range(exposure_start: date, exposure_end: date) -> pd.Da
         else:
             m += 1
     return pd.DataFrame(rows)
+
+
+def add_gadm_version_column(
+    survey_time_parsed: pd.DataFrame,
+    *,
+    years_before: int = 1,
+) -> pd.DataFrame:
+    """Add ``exposure_end`` and ``gadm_version`` from parsed field dates."""
+    out = survey_time_parsed.copy()
+    exposure_ends: list[date | None] = []
+    gadm_versions: list[str] = []
+
+    for _, row in out.iterrows():
+        if row["date_parse_flag"] not in (
+            "range_ok",
+            "single_day",
+            "month_year_range_ok",
+            "month_pair_year_ok",
+            "month_abbr_year_ok",
+            "month_only_year_ok",
+        ):
+            exposure_ends.append(None)
+            gadm_versions.append("")
+            continue
+        try:
+            fs, _ = field_dates_as_python_dates(row)
+        except ValueError:
+            exposure_ends.append(None)
+            gadm_versions.append("")
+            continue
+        _, exp_end = exposure_window_inclusive_before_field_start(fs, years_before=years_before)
+        exposure_ends.append(exp_end)
+        gadm_versions.append(recommend_gadm_version(exp_end))
+
+    out["exposure_end"] = exposure_ends
+    out["gadm_version"] = gadm_versions
+    return out
+
+
+def build_survey_time_gadm_version_table(path: Path) -> pd.DataFrame:
+    """Load survey CSV, parse dates, assign GADM version; return wide audit frame."""
+    raw = load_survey_time_table(path)
+    parsed = add_parsed_field_dates(raw)
+    return add_gadm_version_column(parsed)
+
+
+def write_survey_time_gadm_version_csv(
+    in_path: Path,
+    out_path: Path,
+) -> pd.DataFrame:
+    """
+    Write deliverable with original columns plus ``GADM_version``.
+
+    Matches ``VACS_survey_time.csv`` layout: ``Country``, ``Date``, ``notes``, plus new column.
+    """
+    full = build_survey_time_gadm_version_table(in_path)
+    deliverable = pd.DataFrame(
+        {
+            "Country": full["country_wave"],
+            "Date": full["field_period_raw"],
+            "notes": full.get("notes", ""),
+            "GADM_version": full["gadm_version"],
+        }
+    )
+    deliverable.to_csv(out_path, index=False)
+    return full

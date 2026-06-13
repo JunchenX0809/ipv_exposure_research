@@ -21,7 +21,9 @@ flowchart LR
   UTILS --> CSV
 ```
 
-**Flow:** §1 sets the **12-month exposure window** before fieldwork; §3 loads **admin‑2 regions** (GADM 4.0 for Zimbabwe POC; Zambia pilots still use FAO GAUL 2015); §4–§5 are optional EDA (burn / hot pixels); §6 exports district×month MODIS with rolling 12 and MoM. Details: [`howto_docs/modis_gadm_country_pipeline.md`](howto_docs/modis_gadm_country_pipeline.md).
+**Flow:** §1 sets the **12-month exposure window** before fieldwork; §3 loads **admin‑2 regions** (GADM 4.0 for Zimbabwe POC; Zambia pilots still use FAO GAUL 2015); §4–§5 are optional EDA (burn / hot pixels); §6 exports district×month MODIS with rolling 12 and MoM.
+
+**Scaling to more countries:** [`howto_docs/modis_gadm_country_pipeline.md`](howto_docs/modis_gadm_country_pipeline.md) (checklist + full Mermaid diagram). Per country: pick GADM version → download 2 GeoJSON files → copy notebook → run §1–§6.
 
 ## Outcome variables
 

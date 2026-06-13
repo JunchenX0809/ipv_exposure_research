@@ -1,17 +1,15 @@
 """
 Build MODIS MCD64A1 admin-2 tables in Adam's export shape (see ``skills/Adam_Modis.docx``).
 
-Adam columns (Kenya reference: ``skills/Adam_kenya_modis_2010.csv``):
+Export columns:
   adm0_name, adm0_pcode, adm1_name, adm1_pcode, adm2_name, adm2_pcode,
-  month_start, month_end, rolling_start, rolling_end,
-  monthly_burned_area_km2, rolling12_burned_area_avg_km2
+  month_start, month_end, monthly_burned_area_km2, avg12_burned_area_km2, mom_pct_change
 
-Extra columns kept: ``burn_area_ha``, ``mom_pct_change``.
-
-Rolling logic (from Adam's EE): ``rolling_start = month_end - 12 months``;
-``rolling12_burned_area_avg_km2`` = mean of district ``monthly_burned_area_km2`` over the
-12 month-starts ``rolling_start + 0..11 months``. Pull extra history before the exposure
-window so early exposure months have full rolling windows.
+``avg12_burned_area_km2`` is the mean of the unit's ``monthly_burned_area_km2`` over the
+12-month exposure window (the 12 months before the survey) — a fixed window, constant for
+every row within an admin area (it is NOT a trailing rolling average). ``mom_pct_change`` is
+month-over-month % change of the monthly value within each unit; we pull one history month
+before the exposure window so the first exposure month has a defined MoM.
 """
 
 from __future__ import annotations
@@ -56,13 +54,9 @@ def adam_month_end_exclusive(month_start: date) -> date:
 
 
 def adam_date_fields(month_start: date) -> dict[str, str]:
-    m_end = adam_month_end_exclusive(month_start)
-    rs = pd.Timestamp(m_end) - pd.DateOffset(months=12)
     return {
         "month_start": month_start.isoformat(),
-        "month_end": m_end.isoformat(),
-        "rolling_start": rs.date().isoformat(),
-        "rolling_end": m_end.isoformat(),
+        "month_end": adam_month_end_exclusive(month_start).isoformat(),
     }
 
 
@@ -70,11 +64,13 @@ def months_table_for_rolling(
     exposure_start: date,
     exposure_end: date,
     *,
-    history_months: int = 11,
+    history_months: int = 1,
 ) -> pd.DataFrame:
     """
     Month rows for GEE: ``history_months`` of context before ``exposure_start``, through ``exposure_end``.
 
+    Only one history month is needed now (so the first exposure month has a defined
+    ``mom_pct_change``); the 12-month average is computed over the exposure window itself.
     Uses the same calendar clipping as ``months_df_inclusive_range``.
     """
     ext_start = (pd.Timestamp(exposure_start) - pd.DateOffset(months=history_months)).date()
@@ -100,8 +96,9 @@ def district_monthly_burn_from_gee(
     regions: ee.FeatureCollection,
     *,
     scale_m: float = 500.0,
+    region_features: list[dict[str, Any]] | None = None,
 ) -> pd.DataFrame:
-    """Long table: district × month with ``monthly_burned_area_km2`` and ``burn_area_ha``."""
+    """Long table: district × month with ``monthly_burned_area_km2``."""
     parts: list[pd.DataFrame] = []
     for _, mr in months_table.iterrows():
         ms = mr["month_start"]
@@ -119,31 +116,38 @@ def district_monthly_burn_from_gee(
             band_name="burned_area_km2",
             out_column="monthly_burned_area_km2",
             scale_m=scale_m,
+            region_features=region_features,
         )
-        bdf["burn_area_ha"] = bdf["monthly_burned_area_km2"] * 100.0
         bdf["month_start"] = ms
         parts.append(bdf)
     return pd.concat(parts, ignore_index=True)
 
 
-def add_rolling12_and_mom(long_df: pd.DataFrame) -> pd.DataFrame:
+def add_mom(long_df: pd.DataFrame, *, unit_col: str = "ADM2_NAME") -> pd.DataFrame:
+    """Month-over-month % change of ``monthly_burned_area_km2`` within each admin unit."""
     out = long_df.copy()
     out["month_start"] = pd.to_datetime(out["month_start"])
-    out = out.sort_values(["ADM2_NAME", "month_start"])
-
-    rolling_vals: list[float] = []
-    for _, row in out.iterrows():
-        ms = row["month_start"].date()
-        m_end = adam_month_end_exclusive(ms)
-        rs = pd.Timestamp(m_end) - pd.DateOffset(months=12)
-        starts = {(rs + pd.DateOffset(months=i)).date() for i in range(12)}
-        md = out["month_start"].dt.date
-        sub = out[(out["ADM2_NAME"] == row["ADM2_NAME"]) & (md.isin(starts))]
-        rolling_vals.append(float(sub["monthly_burned_area_km2"].mean()) if len(sub) else float("nan"))
-    out["rolling12_burned_area_avg_km2"] = rolling_vals
-    out["mom_pct_change"] = out.groupby("ADM2_NAME", group_keys=False)[
+    out = out.sort_values([unit_col, "month_start"])
+    out["mom_pct_change"] = out.groupby(unit_col, group_keys=False)[
         "monthly_burned_area_km2"
     ].transform(lambda s: s.pct_change() * 100.0)
+    return out
+
+
+def add_window_avg(
+    df: pd.DataFrame,
+    *,
+    unit_col: str,
+    value_col: str,
+    out_col: str,
+) -> pd.DataFrame:
+    """Fixed-window mean of ``value_col`` per admin unit (constant across the unit's rows).
+
+    Apply AFTER filtering to the exposure months so the mean covers exactly the 12-month
+    exposure window.
+    """
+    out = df.copy()
+    out[out_col] = out.groupby(unit_col)[value_col].transform("mean")
     return out
 
 
@@ -152,26 +156,24 @@ def to_adam_modis_wide_columns(
     *,
     adm0_name: str,
     adm0_pcode: str,
+    unit_level: int = 2,
 ) -> pd.DataFrame:
     df = long_df.copy()
     df["adm0_name"] = adm0_name
     df["adm0_pcode"] = adm0_pcode
-    df["adm1_name"] = df["ADM1_NAME"]
-    df["adm2_name"] = df["ADM2_NAME"]
-    # Boundary-source codes on the regions FC (GAUL ADM*_CODE or GADM ID_1 / ID_2 as strings)
-    if "ADM1_CODE" in df.columns:
-        df["adm1_pcode"] = df["ADM1_CODE"].astype(str)
-    else:
-        df["adm1_pcode"] = ""
-    if "ADM2_CODE" in df.columns:
-        df["adm2_pcode"] = df["ADM2_CODE"].astype(str)
-    else:
-        df["adm2_pcode"] = ""
+    # Boundary-source codes on the regions FC (GAUL ADM*_CODE or GADM ID_1 / ID_2 as strings).
+    # ADM1-only countries (no GADM ADM2) carry no adm2_* columns.
+    if unit_level >= 1:
+        df["adm1_name"] = df["ADM1_NAME"]
+        df["adm1_pcode"] = df["ADM1_CODE"].astype(str) if "ADM1_CODE" in df.columns else ""
+    if unit_level >= 2:
+        df["adm2_name"] = df["ADM2_NAME"]
+        df["adm2_pcode"] = df["ADM2_CODE"].astype(str) if "ADM2_CODE" in df.columns else ""
 
     df = df.loc[:, ~df.columns.duplicated(keep="first")]
     ms = pd.to_datetime(df["month_start"])
     date_rows = [adam_date_fields(pd.Timestamp(ts).date()) for ts in ms]
-    for key in ("month_start", "month_end", "rolling_start", "rolling_end"):
+    for key in ("month_start", "month_end"):
         df[key] = [row[key] for row in date_rows]
 
     adam_first = [
@@ -183,18 +185,16 @@ def to_adam_modis_wide_columns(
         "adm2_pcode",
         "month_start",
         "month_end",
-        "rolling_start",
-        "rolling_end",
         "monthly_burned_area_km2",
-        "rolling12_burned_area_avg_km2",
-        "burn_area_ha",
+        "avg12_burned_area_km2",
         "mom_pct_change",
     ]
     cols = [c for c in adam_first if c in df.columns]
     out = df.loc[:, cols]
     if out.columns.duplicated().any():
         out = out.loc[:, ~pd.Index(out.columns).duplicated(keep="first")]
-    return out.sort_values(["adm1_name", "adm2_name", "month_start"])
+    sort_cols = [c for c in ("adm1_name", "adm2_name") if c in out.columns] + ["month_start"]
+    return out.sort_values(sort_cols)
 
 
 def filter_export_months(df: pd.DataFrame, exposure_start: date, exposure_end: date) -> pd.DataFrame:
@@ -213,12 +213,29 @@ def build_adam_modis_export(
     exposure_start: date,
     exposure_end: date,
     scale_m: float = 500.0,
+    region_features: list[dict[str, Any]] | None = None,
+    unit_level: int = 2,
 ) -> pd.DataFrame:
-    """GEE pull → rolling/mom → Adam column names → exposure-month filter."""
-    long_df = district_monthly_burn_from_gee(months_table, regions, scale_m=scale_m)
-    long_df = add_rolling12_and_mom(long_df)
-    wide = to_adam_modis_wide_columns(long_df, adm0_name=adm0_name, adm0_pcode=adm0_pcode)
-    return filter_export_months(wide, exposure_start, exposure_end)
+    """GEE pull → MoM → exposure-month filter → fixed 12-month avg → Adam column names.
+
+    ``unit_level`` selects the admin level of the regions (2 = districts, 1 = provinces/raions
+    for countries with no GADM ADM2, 0 = national).
+    """
+    unit_col = f"ADM{unit_level}_NAME"
+    long_df = district_monthly_burn_from_gee(
+        months_table, regions, scale_m=scale_m, region_features=region_features
+    )
+    long_df = add_mom(long_df, unit_col=unit_col)
+    long_df = filter_export_months(long_df, exposure_start, exposure_end)
+    long_df = add_window_avg(
+        long_df,
+        unit_col=unit_col,
+        value_col="monthly_burned_area_km2",
+        out_col="avg12_burned_area_km2",
+    )
+    return to_adam_modis_wide_columns(
+        long_df, adm0_name=adm0_name, adm0_pcode=adm0_pcode, unit_level=unit_level
+    )
 
 
 def write_adam_modis_csv(df: pd.DataFrame, path: Path) -> Path:
