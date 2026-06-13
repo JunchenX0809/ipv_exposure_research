@@ -6,11 +6,17 @@ Notebooks should import from here instead of duplicating collection IDs and
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
 import ee
 import pandas as pd
+
+# Inline GADM GeoJSON FeatureCollections can exceed EE's ~10 MiB request limit.
+# Chunking uses both a max feature count and a serialized JSON byte budget.
+DEFAULT_REGION_CHUNK_SIZE = 40
+DEFAULT_REGION_CHUNK_MAX_BYTES = 5_000_000
 
 
 def gaul2015_level2_regions(adm0_name: str, *, use_simplified: bool = False) -> ee.FeatureCollection:
@@ -54,6 +60,95 @@ def firms_hot_area_m2_image(
     return hot.multiply(ee.Image.pixelArea()).rename("hot_area_m2")
 
 
+def _feature_dict_chunks(
+    features: list[dict[str, Any]], chunk_size: int
+) -> list[list[dict[str, Any]]]:
+    if len(features) <= chunk_size:
+        return [features]
+    return [features[i : i + chunk_size] for i in range(0, len(features), chunk_size)]
+
+
+def _feature_dict_chunks_by_bytes(
+    features: list[dict[str, Any]],
+    *,
+    max_bytes: int,
+    max_count: int,
+) -> list[list[dict[str, Any]]]:
+    """Split features so each chunk stays under EE's inline payload limit."""
+    if not features:
+        return [[]]
+    chunks: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    current_bytes = 0
+    for feat in features:
+        feat_bytes = len(json.dumps(feat, separators=(",", ":")))
+        if current and (
+            len(current) >= max_count or current_bytes + feat_bytes > max_bytes
+        ):
+            chunks.append(current)
+            current = []
+            current_bytes = 0
+        current.append(feat)
+        current_bytes += feat_bytes
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _region_collections_for_reduce(
+    regions: ee.FeatureCollection,
+    *,
+    region_features: list[dict[str, Any]] | None,
+    chunk_size: int,
+    chunk_max_bytes: int = DEFAULT_REGION_CHUNK_MAX_BYTES,
+) -> list[ee.FeatureCollection]:
+    """
+    Build one or more FeatureCollections under EE's request size limit.
+
+    Prefer ``region_features`` (normalized GADM dicts) so geometry is not sent as one
+    giant inline collection.
+    """
+    if region_features is not None:
+        return [
+            ee.FeatureCollection(chunk)
+            for chunk in _feature_dict_chunks_by_bytes(
+                region_features,
+                max_bytes=chunk_max_bytes,
+                max_count=chunk_size,
+            )
+        ]
+    n = int(regions.size().getInfo())
+    if n <= chunk_size:
+        return [regions]
+    lst = regions.toList(n)
+    return [
+        ee.FeatureCollection(lst.slice(start, min(start + chunk_size, n)))
+        for start in range(0, n, chunk_size)
+    ]
+
+
+def _reduce_regions_sum_to_rows(
+    image: ee.Image,
+    regions: ee.FeatureCollection,
+    *,
+    band_name: str,
+    scale_m: float,
+    tile_scale: int,
+    max_pixels_per_region: float,
+) -> list[dict[str, Any]]:
+    reduced = image.reduceRegions(
+        collection=regions,
+        reducer=ee.Reducer.sum(),
+        scale=scale_m,
+        tileScale=tile_scale,
+        maxPixelsPerRegion=max_pixels_per_region,
+    )
+    rows: list[dict[str, Any]] = []
+    for f in reduced.getInfo().get("features", []):
+        rows.append(dict(f.get("properties") or {}))
+    return rows
+
+
 def reduce_sum_m2_per_feature_to_df(
     area_m2: ee.Image,
     regions: ee.FeatureCollection,
@@ -63,26 +158,34 @@ def reduce_sum_m2_per_feature_to_df(
     scale_m: float,
     tile_scale: int = 4,
     max_pixels_per_region: float = 1e13,
+    region_chunk_size: int = DEFAULT_REGION_CHUNK_SIZE,
+    region_features: list[dict[str, Any]] | None = None,
 ) -> pd.DataFrame:
     """
     ``reduceRegions`` with ``Reducer.sum()``; maps m² → ha in ``out_ha_column``.
 
     EE often names the summed band ``sum`` in properties; we accept either.
+    Large inline boundaries are processed in chunks (see ``DEFAULT_REGION_CHUNK_SIZE``).
     """
-    reduced = area_m2.reduceRegions(
-        collection=regions,
-        reducer=ee.Reducer.sum(),
-        scale=scale_m,
-        tileScale=tile_scale,
-        maxPixelsPerRegion=max_pixels_per_region,
-    )
-    info = reduced.getInfo()
     rows: list[dict[str, Any]] = []
-    for f in info.get("features", []):
-        p = dict(f.get("properties") or {})
+    for chunk_fc in _region_collections_for_reduce(
+        regions,
+        region_features=region_features,
+        chunk_size=region_chunk_size,
+    ):
+        rows.extend(
+            _reduce_regions_sum_to_rows(
+                area_m2,
+                chunk_fc,
+                band_name=band_name,
+                scale_m=scale_m,
+                tile_scale=tile_scale,
+                max_pixels_per_region=max_pixels_per_region,
+            )
+        )
+    for p in rows:
         m2 = p.get(band_name) if p.get(band_name) is not None else p.get("sum")
         p[out_ha_column] = float(m2) / 10000.0 if m2 is not None else None
-        rows.append(p)
     return pd.DataFrame(rows)
 
 
@@ -95,22 +198,29 @@ def reduce_sum_per_feature_to_df(
     scale_m: float,
     tile_scale: int = 4,
     max_pixels_per_region: float = 1e13,
+    region_chunk_size: int = DEFAULT_REGION_CHUNK_SIZE,
+    region_features: list[dict[str, Any]] | None = None,
 ) -> pd.DataFrame:
     """``reduceRegions`` sum; copy summed band to ``out_column`` without unit conversion."""
-    reduced = image.reduceRegions(
-        collection=regions,
-        reducer=ee.Reducer.sum(),
-        scale=scale_m,
-        tileScale=tile_scale,
-        maxPixelsPerRegion=max_pixels_per_region,
-    )
-    info = reduced.getInfo()
     rows: list[dict[str, Any]] = []
-    for f in info.get("features", []):
-        p = dict(f.get("properties") or {})
+    for chunk_fc in _region_collections_for_reduce(
+        regions,
+        region_features=region_features,
+        chunk_size=region_chunk_size,
+    ):
+        rows.extend(
+            _reduce_regions_sum_to_rows(
+                image,
+                chunk_fc,
+                band_name=band_name,
+                scale_m=scale_m,
+                tile_scale=tile_scale,
+                max_pixels_per_region=max_pixels_per_region,
+            )
+        )
+    for p in rows:
         val = p.get(band_name) if p.get(band_name) is not None else p.get("sum")
         p[out_column] = float(val) if val is not None else None
-        rows.append(p)
     return pd.DataFrame(rows)
 
 

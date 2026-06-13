@@ -1,0 +1,10 @@
+iso3,country_wave,adm0_name,adm0_pcode,country_slug,enabled,defer_reason,notes
+MWI,Malawi (2013),Malawi,MW,malawi,1,,
+NAM,Namibia (2019),Namibia,NA,namibia,1,,adm0_pcode NA per Excel gap; confirm with PI
+NGA,Nigeria (2014),Nigeria,NG,nigeria,1,,775 ADM2; long GEE runtime
+RWA,Rwanda,Rwanda,RW,rwanda,1,,
+TZA,Tanzania (2009),Tanzania,TZ,tanzania,1,,GADM 3.6 has 183 ADM2; Excel lists 369 for Tanzania
+ZMB,Zambia (2014),Zambia,ZM,zambia,1,,
+ZWE,Zimbabwe (2017),Zimbabwe,ZW,zimbabwe,0,notebook_poc_done,Skip in --all; use notebook or --iso3 ZWE
+LSO,Letsotho (2018),Lesotho,LS,lesotho,0,adm1_only,Defer: GADM has no ADM2 for LSO
+MDA,Moldova (2013),Moldova,MD,moldova,0,adm1_only,Defer: GADM has no ADM2 for MDA
