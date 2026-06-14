@@ -149,12 +149,19 @@ def feature_count(iso3: str, *, level: int, version: str, root: Path) -> int:
 
 
 def output_paths(
-    root: Path, job: CountryJob, exposure_end: date, *, gadm_version: str
+    root: Path,
+    job: CountryJob,
+    exposure_end: date,
+    *,
+    gadm_version: str,
+    admin_level: int = 2,
 ) -> tuple[Path, Path]:
     year = exposure_end.year
     processed = root / "data" / "processed"
-    modis = processed / f"{job.country_slug}_modis_mcd64_gadm{gadm_version}_{year}.csv"
-    firms = processed / f"{job.country_slug}_firms_gadm{gadm_version}_{year}.csv"
+    # ADM2 keeps the original bare name; ADM1/ADM0 get a level marker so both can coexist.
+    lvl = "" if admin_level == 2 else f"_adm{admin_level}"
+    modis = processed / "modis" / f"{job.country_slug}_modis_mcd64_gadm{gadm_version}{lvl}_{year}.csv"
+    firms = processed / "firms" / f"{job.country_slug}_firms_gadm{gadm_version}{lvl}_{year}.csv"
     return modis, firms
 
 
@@ -174,10 +181,10 @@ def qa_export_df(df: pd.DataFrame, n_units: int, *, level: int, label: str) -> N
     expected = n_units * 12
     if len(df) != expected:
         raise ValueError(f"{label}: expected {expected} rows ({n_units} units × 12 months), got {len(df)}")
-    pcode_col = f"adm{level}_pcode"
-    if df[pcode_col].nunique() != n_units:
+    gid_col = f"adm{level}_gid"
+    if df[gid_col].nunique() != n_units:
         raise ValueError(
-            f"{label}: expected {n_units} unique {pcode_col}, got {df[pcode_col].nunique()}"
+            f"{label}: expected {n_units} unique {gid_col}, got {df[gid_col].nunique()}"
         )
     print(f"  QA OK: {len(df)} rows, {n_units} ADM{level} units, {n_months} exposure months")
 
@@ -194,7 +201,7 @@ def warn_excel_crosswalk(iso3: str, df: pd.DataFrame, root: Path) -> None:
         if sub.empty:
             return
         excel_ids = set(sub["ISO_2"].astype(str))
-        export_ids = set(df["adm2_pcode"].astype(str).unique())
+        export_ids = set(df["adm2_gid"].astype(str).unique())
         matched = len(excel_ids & export_ids)
         if matched != len(export_ids) or matched != len(excel_ids):
             print(
@@ -249,7 +256,9 @@ def export_country(
     exposure_start, exposure_end = resolve_exposure_window(survey_parsed, job.country_wave)
     print(f"  exposure: {exposure_start} .. {exposure_end}")
 
-    modis_path, firms_path = output_paths(root, job, exposure_end, gadm_version=gadm_version)
+    modis_path, firms_path = output_paths(
+        root, job, exposure_end, gadm_version=gadm_version, admin_level=admin_level
+    )
     n_units = feature_count(job.iso3, level=admin_level, version=gadm_version, root=root)
     print(f"  ADM{admin_level} polygons: {n_units}")
 

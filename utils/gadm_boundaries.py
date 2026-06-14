@@ -99,6 +99,19 @@ def _sanitize_properties(props: dict[str, Any]) -> dict[str, Any]:
     return {k: _sanitize_property_value(v) for k, v in props.items()}
 
 
+def geodesic_area_km2(geometry: dict[str, Any]) -> float:
+    """Geodesic (ellipsoidal WGS84) area of a GeoJSON geometry, in km².
+
+    Handles polygons, multipolygons, and holes. GADM geometries are lon/lat (EPSG:4326);
+    this gives an accurate on-the-ground area without choosing a projection.
+    """
+    from pyproj import Geod
+    from shapely.geometry import shape
+
+    area_m2, _ = Geod(ellps="WGS84").geometry_area_perimeter(shape(geometry))
+    return abs(area_m2) / 1e6
+
+
 def adm1_id_by_name(
     iso3: str,
     *,
@@ -148,6 +161,7 @@ def normalize_gadm_level2_features(
                 "ADM1_CODE": id1,
                 "ADM2_NAME": str(name2),
                 "ADM2_CODE": str(id2),
+                "ADM2_AREA_KM2": geodesic_area_km2(feat["geometry"]),
                 "GADM_ID_1": id1,
                 "GADM_ID_2": str(id2),
                 "HASC_2": hasc2,
@@ -219,6 +233,7 @@ def normalize_gadm_level1_features(features: list[dict[str, Any]]) -> list[dict[
                 "ADM0_CODE": _prop(props, "ID_0", "GID_0"),
                 "ADM1_NAME": str(name1),
                 "ADM1_CODE": str(id1),
+                "ADM1_AREA_KM2": geodesic_area_km2(feat["geometry"]),
                 "GADM_ID_1": str(id1),
                 "HASC_1": _prop(props, "HASC_1"),
             }
@@ -238,6 +253,7 @@ def normalize_gadm_level0_features(features: list[dict[str, Any]]) -> list[dict[
             {
                 "ADM0_NAME": _prop(props, "COUNTRY", "NAME_0"),
                 "ADM0_CODE": _prop(props, "ID_0", "GID_0"),
+                "ADM0_AREA_KM2": geodesic_area_km2(feat["geometry"]),
             }
         )
         normalized.append(

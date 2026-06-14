@@ -105,10 +105,13 @@ def to_adam_firms_wide_columns(
     df["adm0_pcode"] = adm0_pcode
     if unit_level >= 1:
         df["adm1_name"] = df["ADM1_NAME"]
-        df["adm1_pcode"] = df["ADM1_CODE"].astype(str) if "ADM1_CODE" in df.columns else ""
+        df["adm1_gid"] = df["ADM1_CODE"].astype(str) if "ADM1_CODE" in df.columns else ""
     if unit_level >= 2:
         df["adm2_name"] = df["ADM2_NAME"]
-        df["adm2_pcode"] = df["ADM2_CODE"].astype(str) if "ADM2_CODE" in df.columns else ""
+        df["adm2_gid"] = df["ADM2_CODE"].astype(str) if "ADM2_CODE" in df.columns else ""
+    area_src = f"ADM{unit_level}_AREA_KM2"
+    if area_src in df.columns:
+        df[f"adm{unit_level}_area_km2"] = df[area_src]
 
     df = df.loc[:, ~df.columns.duplicated(keep="first")]
     ms = pd.to_datetime(df["month_start"])
@@ -120,9 +123,11 @@ def to_adam_firms_wide_columns(
         "adm0_name",
         "adm0_pcode",
         "adm1_name",
-        "adm1_pcode",
+        "adm1_gid",
+        "adm1_area_km2",
         "adm2_name",
-        "adm2_pcode",
+        "adm2_gid",
+        "adm2_area_km2",
         "month_start",
         "month_end",
         "monthly_fire_count",
