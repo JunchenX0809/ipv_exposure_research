@@ -127,6 +127,29 @@ def _region_collections_for_reduce(
     ]
 
 
+def _reduce_regions_to_rows(
+    image: ee.Image,
+    regions: ee.FeatureCollection,
+    *,
+    band_name: str,
+    reducer: ee.Reducer,
+    scale_m: float,
+    tile_scale: int,
+    max_pixels_per_region: float,
+) -> list[dict[str, Any]]:
+    reduced = image.reduceRegions(
+        collection=regions,
+        reducer=reducer,
+        scale=scale_m,
+        tileScale=tile_scale,
+        maxPixelsPerRegion=max_pixels_per_region,
+    )
+    rows: list[dict[str, Any]] = []
+    for f in reduced.getInfo().get("features", []):
+        rows.append(dict(f.get("properties") or {}))
+    return rows
+
+
 def _reduce_regions_sum_to_rows(
     image: ee.Image,
     regions: ee.FeatureCollection,
@@ -136,17 +159,15 @@ def _reduce_regions_sum_to_rows(
     tile_scale: int,
     max_pixels_per_region: float,
 ) -> list[dict[str, Any]]:
-    reduced = image.reduceRegions(
-        collection=regions,
+    return _reduce_regions_to_rows(
+        image,
+        regions,
+        band_name=band_name,
         reducer=ee.Reducer.sum(),
-        scale=scale_m,
-        tileScale=tile_scale,
-        maxPixelsPerRegion=max_pixels_per_region,
+        scale_m=scale_m,
+        tile_scale=tile_scale,
+        max_pixels_per_region=max_pixels_per_region,
     )
-    rows: list[dict[str, Any]] = []
-    for f in reduced.getInfo().get("features", []):
-        rows.append(dict(f.get("properties") or {}))
-    return rows
 
 
 def reduce_sum_m2_per_feature_to_df(
@@ -220,6 +241,42 @@ def reduce_sum_per_feature_to_df(
         )
     for p in rows:
         val = p.get(band_name) if p.get(band_name) is not None else p.get("sum")
+        p[out_column] = float(val) if val is not None else None
+    return pd.DataFrame(rows)
+
+
+def reduce_max_per_feature_to_df(
+    image: ee.Image,
+    regions: ee.FeatureCollection,
+    *,
+    band_name: str,
+    out_column: str,
+    scale_m: float,
+    tile_scale: int = 4,
+    max_pixels_per_region: float = 1e13,
+    region_chunk_size: int = DEFAULT_REGION_CHUNK_SIZE,
+    region_features: list[dict[str, Any]] | None = None,
+) -> pd.DataFrame:
+    """``reduceRegions`` max; copy max band value to ``out_column``."""
+    rows: list[dict[str, Any]] = []
+    for chunk_fc in _region_collections_for_reduce(
+        regions,
+        region_features=region_features,
+        chunk_size=region_chunk_size,
+    ):
+        rows.extend(
+            _reduce_regions_to_rows(
+                image,
+                chunk_fc,
+                band_name=band_name,
+                reducer=ee.Reducer.max(),
+                scale_m=scale_m,
+                tile_scale=tile_scale,
+                max_pixels_per_region=max_pixels_per_region,
+            )
+        )
+    for p in rows:
+        val = p.get(band_name) if p.get(band_name) is not None else p.get("max")
         p[out_column] = float(val) if val is not None else None
     return pd.DataFrame(rows)
 

@@ -29,6 +29,7 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from utils.adam_firms_export import build_adam_firms_export, write_adam_firms_csv
+from utils.adam_frp_export import build_adam_frp_export, write_adam_frp_csv
 from utils.adam_modis_export import build_adam_modis_export, months_table_for_rolling, write_adam_modis_csv
 from utils.gadm_boundaries import (
     GADM_VERSIONS,
@@ -165,6 +166,25 @@ def output_paths(
     return modis, firms
 
 
+def frp_output_path(
+    root: Path,
+    job: CountryJob,
+    exposure_end: date,
+    *,
+    gadm_version: str,
+    admin_level: int = 2,
+) -> Path:
+    year = exposure_end.year
+    lvl = "" if admin_level == 2 else f"_adm{admin_level}"
+    return (
+        root
+        / "data"
+        / "processed"
+        / "frp"
+        / f"{job.country_slug}_modis_frp_gadm{gadm_version}{lvl}_{year}.csv"
+    )
+
+
 def resolve_exposure_window(survey_parsed: pd.DataFrame, country_wave: str) -> tuple[date, date]:
     row = get_country_wave_row(survey_parsed, country_wave)
     flag = row.get("date_parse_flag")
@@ -237,6 +257,7 @@ def export_country(
     admin_level: int,
     do_modis: bool,
     do_firms: bool,
+    do_frp: bool,
     skip_existing: bool,
     dry_run: bool,
 ) -> None:
@@ -259,15 +280,27 @@ def export_country(
     modis_path, firms_path = output_paths(
         root, job, exposure_end, gadm_version=gadm_version, admin_level=admin_level
     )
+    frp_path = frp_output_path(
+        root, job, exposure_end, gadm_version=gadm_version, admin_level=admin_level
+    )
     n_units = feature_count(job.iso3, level=admin_level, version=gadm_version, root=root)
     print(f"  ADM{admin_level} polygons: {n_units}")
 
+    requested_paths = []
+    if do_modis:
+        requested_paths.append(modis_path)
+    if do_firms:
+        requested_paths.append(firms_path)
+    if do_frp:
+        requested_paths.append(frp_path)
+
     if dry_run:
-        print(f"  dry-run: would write {modis_path.name}, {firms_path.name}")
+        names = ", ".join(p.name for p in requested_paths) or "no outputs"
+        print(f"  dry-run: would write {names}")
         return
 
-    if skip_existing and do_modis and do_firms and modis_path.is_file() and firms_path.is_file():
-        print("  skipped (both CSVs exist)")
+    if skip_existing and requested_paths and all(p.is_file() for p in requested_paths):
+        print("  skipped (requested CSVs exist)")
         return
 
     months_gee = months_table_for_rolling(exposure_start, exposure_end)
@@ -333,6 +366,25 @@ def export_country(
     elif do_firms:
         print(f"  FIRMS skipped (exists): {firms_path}")
 
+    if do_frp and not (skip_existing and frp_path.is_file()):
+        print("  FRP export...")
+        adam_frp = build_adam_frp_export(
+            months_gee,
+            regions,
+            adm0_name=job.adm0_name,
+            adm0_pcode=job.adm0_pcode,
+            exposure_start=exposure_start,
+            exposure_end=exposure_end,
+            scale_m=1000.0,
+            region_features=region_features,
+            unit_level=admin_level,
+        )
+        write_adam_frp_csv(adam_frp, frp_path)
+        qa_export_df(adam_frp, n_units, level=admin_level, label="FRP")
+        print(f"  Wrote {frp_path}")
+    elif do_frp:
+        print(f"  FRP skipped (exists): {frp_path}")
+
 
 def select_jobs(
     manifest: list[CountryJob],
@@ -396,9 +448,14 @@ def main() -> None:
     p.add_argument("--export-only", action="store_true", help="Skip convert step")
     p.add_argument("--modis-only", action="store_true")
     p.add_argument("--firms-only", action="store_true")
+    p.add_argument("--frp-only", action="store_true", help="Only export MODIS FRP intensity")
+    p.add_argument("--include-frp", action="store_true", help="Also export MODIS FRP intensity")
     p.add_argument("--dry-run", action="store_true", help="Print plan; no GEE")
     p.add_argument("--project", help="Earth Engine GCP project id")
     args = p.parse_args()
+
+    if args.frp_only and (args.modis_only or args.firms_only or args.include_frp):
+        p.error("--frp-only cannot be combined with --modis-only, --firms-only, or --include-frp")
 
     cli_gadm_version = str(args.gadm_version) if args.gadm_version is not None else None
     if cli_gadm_version is not None and cli_gadm_version not in GADM_VERSIONS:
@@ -431,8 +488,14 @@ def main() -> None:
         if args.convert_only:
             return
 
-    do_modis = not args.firms_only
-    do_firms = not args.modis_only
+    if args.frp_only:
+        do_modis = False
+        do_firms = False
+        do_frp = True
+    else:
+        do_modis = not args.firms_only
+        do_firms = not args.modis_only
+        do_frp = args.include_frp
 
     if not args.dry_run:
         if args.project:
@@ -457,6 +520,7 @@ def main() -> None:
                 admin_level=lvl,
                 do_modis=do_modis,
                 do_firms=do_firms,
+                do_frp=do_frp,
                 skip_existing=args.skip_existing,
                 dry_run=args.dry_run,
             )

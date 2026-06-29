@@ -123,14 +123,19 @@ def district_monthly_burn_from_gee(
     return pd.concat(parts, ignore_index=True)
 
 
-def add_mom(long_df: pd.DataFrame, *, unit_col: str = "ADM2_NAME") -> pd.DataFrame:
-    """Month-over-month % change of ``monthly_burned_area_km2`` within each admin unit."""
+def add_mom(
+    long_df: pd.DataFrame,
+    *,
+    unit_col: str = "ADM2_NAME",
+    value_col: str = "monthly_burned_area_km2",
+) -> pd.DataFrame:
+    """Month-over-month % change of ``value_col`` within each admin unit."""
     out = long_df.copy()
     out["month_start"] = pd.to_datetime(out["month_start"])
     out = out.sort_values([unit_col, "month_start"])
-    out["mom_pct_change"] = out.groupby(unit_col, group_keys=False)[
-        "monthly_burned_area_km2"
-    ].transform(lambda s: s.pct_change() * 100.0)
+    out["mom_pct_change"] = out.groupby(unit_col, group_keys=False)[value_col].transform(
+        lambda s: s.pct_change() * 100.0
+    )
     return out
 
 
