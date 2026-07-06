@@ -10,3 +10,13 @@ ZMB,Zambia (2014),Zambia,ZM,zambia,36,2,1,,
 ZWE,Zimbabwe (2017),Zimbabwe,ZW,zimbabwe,36,2,0,notebook_poc_done,Skip in --all; use notebook or --iso3 ZWE
 LSO,Letsotho (2018),Lesotho,LS,lesotho,36,1,0,,ADM1-only (no GADM ADM2); run explicitly: --iso3 LSO
 MDA,Moldova (2013),Moldova,MD,moldova,36,1,0,,ADM1-only; 2019 VACS despite 2013 label; run explicitly: --iso3 MDA
+KHM,Cambodia (2013),Cambodia,KH,cambodia,36,2,1,,178 ADM2
+COL,Colombia (2018),Colombia,CO,colombia,36,2,1,,1065 ADM2 - long runtime
+CIV,Cotedivoire (2019),Cote d'Ivoire,CI,cotedivoire,36,2,1,,33 ADM2 (GADM3.6 coarse; ADM3/4 exist)
+SLV,El Salvador (2018),El Salvador,SV,elsalvador,36,2,1,,266 ADM2
+SWZ,Eswatini (2007),Eswatini,SZ,eswatini,36,2,1,,2007 wave -> GADM3.6
+SWZ,Eswatini (2022),Eswatini,SZ,eswatini,41,2,1,,2022 wave -> GADM4.1
+HTI,Haiti (2012),Haiti,HT,haiti,36,2,1,,41 ADM2
+HND,Honduras (2017),Honduras,HN,honduras,36,2,1,,298 ADM2
+KEN,Kenya (2010),Kenya,KE,kenya,36,2,1,,wave 1 of 2
+KEN,Kenya(2019),Kenya,KE,kenya,36,2,1,,wave 2 of 2 (label has no space)

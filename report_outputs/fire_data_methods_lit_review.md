@@ -1,6 +1,6 @@
 # Fire-exposure methods — literature summary (MODIS / FIRMS / GEE)
 
-Lean team-facing summary for justifying the current Google Earth Engine fire-exposure choices
+summary for justifying the current Google Earth Engine fire-exposure choices
 and deciding whether to offer additional layers.
 
 ## Bottom line

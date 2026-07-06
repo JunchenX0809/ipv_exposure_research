@@ -29,7 +29,11 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from utils.adam_firms_export import build_adam_firms_export, write_adam_firms_csv
-from utils.adam_frp_export import build_adam_frp_export, write_adam_frp_csv
+from utils.adam_frp_export import (
+    build_adam_frp_export,
+    build_adam_frp_sum_export,
+    write_adam_frp_csv,
+)
 from utils.adam_modis_export import build_adam_modis_export, months_table_for_rolling, write_adam_modis_csv
 from utils.gadm_boundaries import (
     GADM_VERSIONS,
@@ -173,15 +177,18 @@ def frp_output_path(
     *,
     gadm_version: str,
     admin_level: int = 2,
+    metric: str = "max",
 ) -> Path:
     year = exposure_end.year
     lvl = "" if admin_level == 2 else f"_adm{admin_level}"
+    # 'max' keeps the original bare `_frp_` stub; 'sum' gets `_frp_sum_` so both coexist.
+    stub = "frp_sum" if metric == "sum" else "frp"
     return (
         root
         / "data"
         / "processed"
         / "frp"
-        / f"{job.country_slug}_modis_frp_gadm{gadm_version}{lvl}_{year}.csv"
+        / f"{job.country_slug}_modis_{stub}_gadm{gadm_version}{lvl}_{year}.csv"
     )
 
 
@@ -258,6 +265,7 @@ def export_country(
     do_modis: bool,
     do_firms: bool,
     do_frp: bool,
+    frp_metric: str = "max",
     skip_existing: bool,
     dry_run: bool,
 ) -> None:
@@ -281,7 +289,12 @@ def export_country(
         root, job, exposure_end, gadm_version=gadm_version, admin_level=admin_level
     )
     frp_path = frp_output_path(
-        root, job, exposure_end, gadm_version=gadm_version, admin_level=admin_level
+        root,
+        job,
+        exposure_end,
+        gadm_version=gadm_version,
+        admin_level=admin_level,
+        metric=frp_metric,
     )
     n_units = feature_count(job.iso3, level=admin_level, version=gadm_version, root=root)
     print(f"  ADM{admin_level} polygons: {n_units}")
@@ -367,8 +380,11 @@ def export_country(
         print(f"  FIRMS skipped (exists): {firms_path}")
 
     if do_frp and not (skip_existing and frp_path.is_file()):
-        print("  FRP export...")
-        adam_frp = build_adam_frp_export(
+        print(f"  FRP export ({frp_metric})...")
+        frp_builder = (
+            build_adam_frp_sum_export if frp_metric == "sum" else build_adam_frp_export
+        )
+        adam_frp = frp_builder(
             months_gee,
             regions,
             adm0_name=job.adm0_name,
@@ -380,7 +396,7 @@ def export_country(
             unit_level=admin_level,
         )
         write_adam_frp_csv(adam_frp, frp_path)
-        qa_export_df(adam_frp, n_units, level=admin_level, label="FRP")
+        qa_export_df(adam_frp, n_units, level=admin_level, label=f"FRP ({frp_metric})")
         print(f"  Wrote {frp_path}")
     elif do_frp:
         print(f"  FRP skipped (exists): {frp_path}")
@@ -450,6 +466,12 @@ def main() -> None:
     p.add_argument("--firms-only", action="store_true")
     p.add_argument("--frp-only", action="store_true", help="Only export MODIS FRP intensity")
     p.add_argument("--include-frp", action="store_true", help="Also export MODIS FRP intensity")
+    p.add_argument(
+        "--frp-metric",
+        choices=("max", "sum"),
+        default="max",
+        help="FRP aggregation: 'max' (peak-intensity, legacy) or 'sum' (summed observed FRP)",
+    )
     p.add_argument("--dry-run", action="store_true", help="Print plan; no GEE")
     p.add_argument("--project", help="Earth Engine GCP project id")
     args = p.parse_args()
@@ -521,6 +543,7 @@ def main() -> None:
                 do_modis=do_modis,
                 do_firms=do_firms,
                 do_frp=do_frp,
+                frp_metric=args.frp_metric,
                 skip_existing=args.skip_existing,
                 dry_run=args.dry_run,
             )
