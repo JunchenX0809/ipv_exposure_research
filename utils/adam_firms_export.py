@@ -154,7 +154,7 @@ def build_adam_firms_export(
     unit_level: int = 2,
 ) -> pd.DataFrame:
     """GEE pull → exposure-month filter → fixed 12-month avg → Adam FIRMS column names."""
-    unit_col = f"ADM{unit_level}_NAME"
+    unit_col = f"ADM{unit_level}_CODE"
     long_df = district_monthly_firms_from_gee(
         months_table, regions, scale_m=scale_m, region_features=region_features
     )

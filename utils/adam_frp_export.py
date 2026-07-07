@@ -343,7 +343,7 @@ def build_adam_frp_export(
     unit_level: int = 2,
 ) -> pd.DataFrame:
     """GEE pull -> MoM -> exposure-month filter -> fixed 12-month avg -> CSV columns."""
-    unit_col = f"ADM{unit_level}_NAME"
+    unit_col = f"ADM{unit_level}_CODE"
     long_df = district_monthly_frp_from_gee(
         months_table, regions, scale_m=scale_m, region_features=region_features
     )

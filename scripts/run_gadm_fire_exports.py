@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Batch GADM admin-2 MODIS MCD64A1 + FIRMS exports (Adam CSV format).
+Batch GADM admin-level MODIS MCD64A1, FIRMS, FRP, and VIIRS exports.
 
 Uses ``config/gadm_fire_countries.csv`` (per-row ``gadm_version``), local GADM GeoJSON,
 and VACS survey dates. See ``howto_docs/modis_gadm_country_pipeline.md``.
@@ -11,6 +11,7 @@ Examples::
     python scripts/run_gadm_fire_exports.py --iso3 MOZ --export-only
     python scripts/run_gadm_fire_exports.py --iso3 TZA --gadm-version 41 --export-only
     python scripts/run_gadm_fire_exports.py --all
+    python scripts/run_gadm_fire_exports.py --iso3 ZWE --viirs-only --export-only
 """
 
 from __future__ import annotations
@@ -34,7 +35,17 @@ from utils.adam_frp_export import (
     build_adam_frp_sum_export,
     write_adam_frp_csv,
 )
-from utils.adam_modis_export import build_adam_modis_export, months_table_for_rolling, write_adam_modis_csv
+from utils.adam_modis_export import (
+    build_adam_modis_export,
+    months_table_for_rolling,
+    write_adam_modis_csv,
+)
+from utils.adam_viirs_export import (
+    VIIRS_FULL_COVERAGE_START,
+    build_adam_viirs_export,
+    validate_viirs_coverage,
+    write_adam_viirs_csv,
+)
 from utils.gadm_boundaries import (
     GADM_VERSIONS,
     gadm_geojson_path,
@@ -192,6 +203,25 @@ def frp_output_path(
     )
 
 
+def viirs_output_path(
+    root: Path,
+    job: CountryJob,
+    exposure_end: date,
+    *,
+    gadm_version: str,
+    admin_level: int = 2,
+) -> Path:
+    year = exposure_end.year
+    lvl = "" if admin_level == 2 else f"_adm{admin_level}"
+    return (
+        root
+        / "data"
+        / "processed"
+        / "viirs"
+        / f"{job.country_slug}_viirs_vnp14a1_gadm{gadm_version}{lvl}_{year}.csv"
+    )
+
+
 def resolve_exposure_window(survey_parsed: pd.DataFrame, country_wave: str) -> tuple[date, date]:
     row = get_country_wave_row(survey_parsed, country_wave)
     flag = row.get("date_parse_flag")
@@ -265,6 +295,7 @@ def export_country(
     do_modis: bool,
     do_firms: bool,
     do_frp: bool,
+    do_viirs: bool,
     frp_metric: str = "max",
     skip_existing: bool,
     dry_run: bool,
@@ -296,6 +327,9 @@ def export_country(
         admin_level=admin_level,
         metric=frp_metric,
     )
+    viirs_path = viirs_output_path(
+        root, job, exposure_end, gadm_version=gadm_version, admin_level=admin_level
+    )
     n_units = feature_count(job.iso3, level=admin_level, version=gadm_version, root=root)
     print(f"  ADM{admin_level} polygons: {n_units}")
 
@@ -306,6 +340,9 @@ def export_country(
         requested_paths.append(firms_path)
     if do_frp:
         requested_paths.append(frp_path)
+    if do_viirs:
+        validate_viirs_coverage(exposure_start)
+        requested_paths.append(viirs_path)
 
     if dry_run:
         names = ", ".join(p.name for p in requested_paths) or "no outputs"
@@ -401,6 +438,25 @@ def export_country(
     elif do_frp:
         print(f"  FRP skipped (exists): {frp_path}")
 
+    if do_viirs and not (skip_existing and viirs_path.is_file()):
+        print("  VIIRS export...")
+        adam_viirs = build_adam_viirs_export(
+            months_gee,
+            regions,
+            adm0_name=job.adm0_name,
+            adm0_pcode=job.adm0_pcode,
+            exposure_start=exposure_start,
+            exposure_end=exposure_end,
+            scale_m=1000.0,
+            region_features=region_features,
+            unit_level=admin_level,
+        )
+        write_adam_viirs_csv(adam_viirs, viirs_path)
+        qa_export_df(adam_viirs, n_units, level=admin_level, label="VIIRS")
+        print(f"  Wrote {viirs_path}")
+    elif do_viirs:
+        print(f"  VIIRS skipped (exists): {viirs_path}")
+
 
 def select_jobs(
     manifest: list[CountryJob],
@@ -437,6 +493,28 @@ def select_jobs(
     raise ValueError("Provide --all or --iso3 ISO3[,ISO3,...]")
 
 
+def filter_viirs_available_jobs(
+    jobs: list[CountryJob],
+    survey_parsed: pd.DataFrame,
+) -> list[CountryJob]:
+    """Keep jobs whose full 12-month exposure window is covered by VNP14A1."""
+    keep: list[CountryJob] = []
+    skipped: list[str] = []
+    for job in jobs:
+        exposure_start, _ = resolve_exposure_window(survey_parsed, job.country_wave)
+        if exposure_start >= VIIRS_FULL_COVERAGE_START:
+            keep.append(job)
+        else:
+            skipped.append(f"{job.iso3} ({job.country_wave})")
+    if skipped:
+        print(
+            "VIIRS coverage: skipped "
+            f"{len(skipped)} pre-{VIIRS_FULL_COVERAGE_START} window(s): "
+            + ", ".join(skipped)
+        )
+    return keep
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Batch GADM MODIS + FIRMS exports (ADM1/ADM2)")
     p.add_argument("--all", action="store_true", help="All enabled countries in manifest")
@@ -466,6 +544,8 @@ def main() -> None:
     p.add_argument("--firms-only", action="store_true")
     p.add_argument("--frp-only", action="store_true", help="Only export MODIS FRP intensity")
     p.add_argument("--include-frp", action="store_true", help="Also export MODIS FRP intensity")
+    p.add_argument("--viirs-only", action="store_true", help="Only export VIIRS active fire")
+    p.add_argument("--include-viirs", action="store_true", help="Also export VIIRS active fire")
     p.add_argument(
         "--frp-metric",
         choices=("max", "sum"),
@@ -476,8 +556,28 @@ def main() -> None:
     p.add_argument("--project", help="Earth Engine GCP project id")
     args = p.parse_args()
 
-    if args.frp_only and (args.modis_only or args.firms_only or args.include_frp):
-        p.error("--frp-only cannot be combined with --modis-only, --firms-only, or --include-frp")
+    if args.frp_only and (
+        args.modis_only
+        or args.firms_only
+        or args.include_frp
+        or args.viirs_only
+        or args.include_viirs
+    ):
+        p.error(
+            "--frp-only cannot be combined with --modis-only, --firms-only, "
+            "--include-frp, --viirs-only, or --include-viirs"
+        )
+    if args.viirs_only and (
+        args.modis_only
+        or args.firms_only
+        or args.frp_only
+        or args.include_frp
+        or args.include_viirs
+    ):
+        p.error(
+            "--viirs-only cannot be combined with --modis-only, --firms-only, "
+            "--frp-only, --include-frp, or --include-viirs"
+        )
 
     cli_gadm_version = str(args.gadm_version) if args.gadm_version is not None else None
     if cli_gadm_version is not None and cli_gadm_version not in GADM_VERSIONS:
@@ -514,10 +614,24 @@ def main() -> None:
         do_modis = False
         do_firms = False
         do_frp = True
+        do_viirs = False
+    elif args.viirs_only:
+        do_modis = False
+        do_firms = False
+        do_frp = False
+        do_viirs = True
     else:
         do_modis = not args.firms_only
         do_firms = not args.modis_only
         do_frp = args.include_frp
+        do_viirs = args.include_viirs
+
+    survey_path = resolve_vacs_survey_time_csv(root)
+    survey_parsed = add_parsed_field_dates(load_survey_time_table(survey_path))
+    if args.viirs_only and args.all:
+        jobs = filter_viirs_available_jobs(jobs, survey_parsed)
+        if not jobs:
+            raise SystemExit("No selected countries have full VIIRS VNP14A1 coverage.")
 
     if not args.dry_run:
         if args.project:
@@ -526,9 +640,6 @@ def main() -> None:
             os.environ["EARTHENGINE_PROJECT"] = args.project
         project = ee_initialize_from_environ()
         print(f"Earth Engine project: {project}")
-
-    survey_path = resolve_vacs_survey_time_csv(root)
-    survey_parsed = add_parsed_field_dates(load_survey_time_table(survey_path))
 
     for job in jobs:
         ver = effective_gadm_version(job, cli_gadm_version)
@@ -543,6 +654,7 @@ def main() -> None:
                 do_modis=do_modis,
                 do_firms=do_firms,
                 do_frp=do_frp,
+                do_viirs=do_viirs,
                 frp_metric=args.frp_metric,
                 skip_existing=args.skip_existing,
                 dry_run=args.dry_run,

@@ -232,7 +232,7 @@ def build_adam_modis_export(
     ``unit_level`` selects the admin level of the regions (2 = districts, 1 = provinces/raions
     for countries with no GADM ADM2, 0 = national).
     """
-    unit_col = f"ADM{unit_level}_NAME"
+    unit_col = f"ADM{unit_level}_CODE"
     long_df = district_monthly_burn_from_gee(
         months_table, regions, scale_m=scale_m, region_features=region_features
     )
