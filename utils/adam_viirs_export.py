@@ -32,6 +32,7 @@ __all__ = [
     "validate_viirs_coverage",
     "viirs_monthly_fire_count_image",
     "viirs_monthly_max_frp_mw_image",
+    "viirs_monthly_sum_frp_mw_image",
     "write_adam_viirs_csv",
 ]
 
@@ -118,6 +119,37 @@ def viirs_monthly_max_frp_mw_image(date_start: str, date_end_exclusive: str) -> 
     )
 
 
+def viirs_monthly_sum_frp_mw_image(date_start: str, date_end_exclusive: str) -> ee.Image:
+    """Monthly SUM of daily per-cell VIIRS FRP (MW) over active-fire days (``VNP14A1``).
+
+    Mirrors the MODIS summed-FRP construction (``.sum()`` of per-cell ``MaxFRP`` on fire
+    pixels). VNP14A1 ``MaxFRP`` is already in MW (no 0.1 scale, unlike MODIS ``MOD14A1``).
+    Single sensor (Suomi-NPP), so it accumulates fewer daily samples than the MODIS
+    Terra+Aqua merge — internally valid, but not magnitude-comparable to MODIS summed FRP.
+    """
+    projection = _viirs_projection()
+    viirs = (
+        ee.ImageCollection(VIIRS_COLLECTION)
+        .filter(ee.Filter.date(date_start, date_end_exclusive))
+        .select(["FireMask", "MaxFRP"])
+    )
+    summed = (
+        viirs.map(_viirs_frp_image)
+        .sum()
+        .unmask(0)
+        .rename("monthly_sum_frp_mw")
+        .setDefaultProjection(projection)
+    )
+    empty = (
+        ee.Image.constant(0)
+        .rename("monthly_sum_frp_mw")
+        .setDefaultProjection(projection)
+    )
+    return ee.Image(ee.Algorithms.If(viirs.size().gt(0), summed, empty)).rename(
+        "monthly_sum_frp_mw"
+    )
+
+
 def admin_monthly_viirs_from_gee(
     months_table: pd.DataFrame,
     regions: ee.FeatureCollection,
@@ -125,7 +157,7 @@ def admin_monthly_viirs_from_gee(
     scale_m: float = 1000.0,
     region_features: list[dict] | None = None,
 ) -> pd.DataFrame:
-    """Long table: admin unit x month with active-fire count and max FRP."""
+    """Long table: admin unit x month with active-fire count, max FRP, and summed FRP."""
     parts: list[pd.DataFrame] = []
     for _, mr in months_table.iterrows():
         ms = mr["month_start"]
@@ -152,8 +184,18 @@ def admin_monthly_viirs_from_gee(
             scale_m=scale_m,
             region_features=region_features,
         )
+        sum_df = reduce_sum_per_feature_to_df(
+            viirs_monthly_sum_frp_mw_image(ms.isoformat(), mex_s),
+            regions,
+            band_name="monthly_sum_frp_mw",
+            out_column="monthly_sum_frp_mw",
+            scale_m=scale_m,
+            region_features=region_features,
+        )
         key = "ADM2_CODE" if "ADM2_CODE" in fire_df.columns else "ADM1_CODE"
-        merged = fire_df.merge(max_df[[key, "monthly_max_frp_mw"]], on=key)
+        merged = fire_df.merge(max_df[[key, "monthly_max_frp_mw"]], on=key).merge(
+            sum_df[[key, "monthly_sum_frp_mw"]], on=key
+        )
         merged["month_start"] = ms
         parts.append(merged)
     return pd.concat(parts, ignore_index=True)
@@ -199,7 +241,9 @@ def to_adam_viirs_wide_columns(
         "month_end",
         "monthly_fire_count",
         "monthly_max_frp_mw",
+        "monthly_sum_frp_mw",
         "avg12_fire_count",
+        "avg12_sum_frp_mw",
     ]
     cols = [c for c in adam_cols if c in df.columns]
     out = df.loc[:, cols]
@@ -234,6 +278,12 @@ def build_adam_viirs_export(
         unit_col=unit_col,
         value_col="monthly_fire_count",
         out_col="avg12_fire_count",
+    )
+    long_df = add_window_avg(
+        long_df,
+        unit_col=unit_col,
+        value_col="monthly_sum_frp_mw",
+        out_col="avg12_sum_frp_mw",
     )
     return to_adam_viirs_wide_columns(
         long_df, adm0_name=adm0_name, adm0_pcode=adm0_pcode, unit_level=unit_level
