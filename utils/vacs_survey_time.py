@@ -258,29 +258,39 @@ def next_day(d: date) -> date:
 
 
 def months_df_inclusive_range(exposure_start: date, exposure_end: date) -> pd.DataFrame:
-    """Calendar month slices clipped to [exposure_start, exposure_end] (inclusive); EE filter end exclusive."""
+    """Month-long slices anchored on ``exposure_start`` within an inclusive interval.
+
+    The returned ``month_end`` is inclusive, while ``filter_end_exclusive`` is the
+    corresponding Earth Engine filter boundary.  Advancing each boundary from the
+    original anchor (rather than from the preceding slice) avoids calendar-month
+    drift when a day does not exist in a shorter month.
+    """
+    if exposure_end < exposure_start:
+        raise ValueError(
+            f"exposure_end {exposure_end} precedes exposure_start {exposure_start}"
+        )
+
     rows: list[dict[str, Any]] = []
-    y, m = exposure_start.year, exposure_start.month
+    interval_end_exclusive = next_day(exposure_end)
+    offset = 0
     while True:
-        ms = date(y, m, 1)
-        last = date(y, m, calendar.monthrange(y, m)[1])
-        s = max(ms, exposure_start)
-        e = min(last, exposure_end)
-        if s <= e:
-            rows.append(
-                {
-                    "month_start": s,
-                    "month_end": e,
-                    "filter_end_exclusive": next_day(e),
-                }
-            )
-        if (y, m) >= (exposure_end.year, exposure_end.month):
+        slice_start = (
+            pd.Timestamp(exposure_start) + pd.DateOffset(months=offset)
+        ).date()
+        if slice_start >= interval_end_exclusive:
             break
-        if m == 12:
-            y += 1
-            m = 1
-        else:
-            m += 1
+        next_anchor = (
+            pd.Timestamp(exposure_start) + pd.DateOffset(months=offset + 1)
+        ).date()
+        filter_end_exclusive = min(next_anchor, interval_end_exclusive)
+        rows.append(
+            {
+                "month_start": slice_start,
+                "month_end": filter_end_exclusive - timedelta(days=1),
+                "filter_end_exclusive": filter_end_exclusive,
+            }
+        )
+        offset += 1
     return pd.DataFrame(rows)
 
 

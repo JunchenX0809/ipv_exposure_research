@@ -13,3 +13,7 @@ pymupdf>=1.23.0
 # To upgrade only this package: pip install earthengine-api --upgrade
 # To upgrade everything in this file: pip install -r requirements.txt --upgrade
 earthengine-api>=0.1.384
+# Boundary conversion/normalization (already used by GADM and AOD helpers).
+geopandas>=1.0.0
+shapely>=2.1.0
+pyproj>=3.6.0

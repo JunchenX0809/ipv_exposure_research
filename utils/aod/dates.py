@@ -47,24 +47,29 @@ def resolve_exposure_window(repo_root: Path, country_wave: str) -> tuple[date, d
 def complete_calendar_months(
     exposure_start: date, exposure_end: date
 ) -> pd.DataFrame:
-    """Return the 12 complete calendar months used by the existing exposure files.
+    """Return 12 month-long slices anchored on ``exposure_start``'s day.
 
-    Month starts must fall inside the exact pre-fieldwork interval. A partial first
-    month is therefore excluded, while the last selected month is represented as a
-    complete calendar month with an exclusive ``month_end``.
+    ``month_end`` is exclusive, matching Earth Engine's date-filter convention.
+    The inclusive exposure interval must end one day before the twelfth slice's
+    exclusive boundary.
     """
-    first = pd.Timestamp(exposure_start).replace(day=1)
-    if exposure_start.day != 1:
-        first += pd.DateOffset(months=1)
-    starts = pd.date_range(first, periods=12, freq="MS")
-    if starts[-1].date() > exposure_end:
+    starts = [
+        (pd.Timestamp(exposure_start) + pd.DateOffset(months=offset)).date()
+        for offset in range(12)
+    ]
+    ends = [
+        (pd.Timestamp(exposure_start) + pd.DateOffset(months=offset)).date()
+        for offset in range(1, 13)
+    ]
+    expected_end = ends[-1] - pd.Timedelta(days=1)
+    if expected_end != exposure_end:
         raise ValueError(
-            f"Cannot form 12 complete calendar months inside {exposure_start}..{exposure_end}"
+            f"Expected a 12-month inclusive interval ending {expected_end}; "
+            f"got {exposure_start}..{exposure_end}"
         )
-    ends = starts + pd.DateOffset(months=1)
     return pd.DataFrame(
         {
-            "month_start": [ts.date() for ts in starts],
-            "month_end": [ts.date() for ts in ends],
+            "month_start": starts,
+            "month_end": ends,
         }
     )

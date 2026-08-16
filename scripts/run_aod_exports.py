@@ -127,7 +127,7 @@ def _extract_job(
     )
     print(
         f"  exact exposure: {exposure_start}..{exposure_end}; "
-        f"calendar output: {window_start}..{window_end} exclusive",
+        f"anchored output: {window_start}..{window_end} exclusive",
         flush=True,
     )
     print(

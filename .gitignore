@@ -12,7 +12,9 @@ __pycache__/
 misc_files/
 skills/
 howto_docs/
+lit_reviews/
 
 data/
 tests/
 covariates_notebooks/
+indonesia_side_tasks/

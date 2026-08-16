@@ -71,7 +71,8 @@ def months_table_for_rolling(
 
     Only one history month is needed now (so the first exposure month has a defined
     ``mom_pct_change``); the 12-month average is computed over the exposure window itself.
-    Uses the same calendar clipping as ``months_df_inclusive_range``.
+    Every slice stays anchored on the exposure start's day of month.  With one
+    history month this yields one context slice followed by the 12 exposure slices.
     """
     ext_start = (pd.Timestamp(exposure_start) - pd.DateOffset(months=history_months)).date()
     raw = months_df_inclusive_range(ext_start, exposure_end)
@@ -209,6 +210,7 @@ def to_adam_modis_wide_columns(
 
 
 def filter_export_months(df: pd.DataFrame, exposure_start: date, exposure_end: date) -> pd.DataFrame:
+    """Keep anchored slices whose starts fall in the inclusive exposure interval."""
     ms = pd.to_datetime(df["month_start"])
     lo = pd.Timestamp(exposure_start)
     hi = pd.Timestamp(exposure_end)
