@@ -54,16 +54,16 @@ overlap without an explicit analytic decision.
 ## 2. Colombia — 2018
 
 The combined file contains **2,705 respondents**, all with `admin1` and `admin2`. It has
-33 department/District codes, 58 repeating `admin2` suffixes, and **92 distinct five-digit
-DIVIPOLA keys**. All 92 keys and all respondents are recovered uniquely in DANE's official
-2018 municipality service; this is **100% administrative-code recovery**, not 100% GADM
-boundary agreement.
+33 department/District codes, 58 repeating `admin2` suffixes, and **92 distinct
+`(admin1, admin2)` pairs**. An external administrative lookup recovered a unique area name
+for every pair and respondent; it was used for validation only and is not a linkage field.
+This is **100% survey-area name recovery**, not 100% GADM boundary agreement.
 
 The same linkage direction applies here: **clean survey → approved crosswalk → GADM
-exposure**. For example, survey values `admin1 = 5` and `admin2 = 1` identify DIVIPOLA
-`05001` (Medellín); the crosswalk maps `05001` to GADM `adm2_gid = COL.2.68_1`; and that
-GID links to the Colombia exposure rows. The three-digit `admin2` suffix is not unique
-without its department, but the final exposure join uses the mapped GADM GID.
+exposure**. For example, survey values `(admin1 = 5, admin2 = 1)` identify Medellín; the
+crosswalk maps that survey pair to GADM `adm2_gid = COL.2.68_1`; and that GID links to the
+Colombia exposure rows. `admin2` is not unique without `admin1`, but the final exposure
+join uses the mapped GADM GID.
 
 ### ADM1 finding
 
@@ -84,21 +84,21 @@ Cundinamarca ADM1 exposure.
 The examples below show the actual operation represented by each stage. The title/article
 stage is split into its two component operations for clarity.
 
-| Linkage method | DIVIPOLA and DANE 2018 name | Candidate GADM 3.6 ADM2 | Respondents | Why it fits the method |
+| Linkage method | Clean-survey fields and validated area name | Candidate GADM 3.6 ADM2 | Respondents | Why it fits the method |
 |---|---|---|---:|---|
-| Direct normalized `NAME_2` | `05001` Medellín | Medellín (`COL.2.68_1`) | 114 | Same normalized municipality name within Antioquia |
-| Exact `VARNAME_2` alias | `52001` Pasto | San Juan de Pasto (`COL.21.50_1`) | 31 | GADM records Pasto as an exact alternate name |
-| Remove administrative title | `08001` Distrito Especial, Industrial y Portuario de Barranquilla | Barranquilla (`COL.4.2_1`) | 165 | Removing the official title leaves the GADM name within Atlántico |
-| Article variant | `50370` Uribe | La Uribe (`COL.20.13_1`) | 15 | Names differ only by the article within Meta |
-| Bogotá hierarchy/name candidate | `11001` Bogotá, D.C. | Santafé de Bogotá (`COL.14.79_1`) | 116 | Historical GADM name and ADM1-parent mismatch; manual boundary approval is required |
+| Direct normalized `NAME_2` | `(admin1=5, admin2=1)` Medellín | Medellín (`COL.2.68_1`) | 114 | Same normalized municipality name within Antioquia |
+| Exact `VARNAME_2` alias | `(admin1=52, admin2=1)` Pasto | San Juan de Pasto (`COL.21.50_1`) | 31 | GADM records Pasto as an exact alternate name |
+| Remove administrative title | `(admin1=8, admin2=1)` Distrito Especial, Industrial y Portuario de Barranquilla | Barranquilla (`COL.4.2_1`) | 165 | Removing the official title leaves the GADM name within Atlántico |
+| Article variant | `(admin1=50, admin2=370)` Uribe | La Uribe (`COL.20.13_1`) | 15 | Names differ only by the article within Meta |
+| Bogotá hierarchy/name candidate | `(admin1=11, admin2=1)` Bogotá, D.C. | Santafé de Bogotá (`COL.14.79_1`) | 116 | Historical GADM name and ADM1-parent mismatch; manual boundary approval is required |
 
 This gives **90/92 GADM name candidates and 2,644/2,705 respondents (97.7%)**. The two
-units absent from GADM 3.6 are Zapayán (`47960`, 31 respondents) and Mapiripana (`94663`,
-30 respondents). Both appear in GADM 4.1, but that cannot be mixed directly with the
-current GADM 3.6 exposure outputs.
+survey pairs absent from GADM 3.6 are Zapayán (`admin1=47, admin2=960`, 31 respondents)
+and Mapiripana (`admin1=94, admin2=663`, 30 respondents). Both appear in GADM 4.1, but
+that cannot be mixed directly with the current GADM 3.6 exposure outputs.
 
 Name recovery still overstates geographic compatibility. Among the 90 name candidates,
 only 21 have at least 90% survey-to-GADM polygon overlap, 45 have at least 80%, and 84 have
-at least 50%. Six same-name candidates fall below 50%. The cleanest route to deterministic
-municipality linkage would be to regenerate exposures on DANE 2018 boundaries; retaining
-GADM 3.6 instead requires documented candidate approval and sensitivity treatment.
+at least 50%. Six same-name candidates fall below 50%. The external boundary comparison
+was diagnostic only; the current linkage remains tied to GADM 3.6 and therefore requires
+documented candidate approval and sensitivity treatment.
