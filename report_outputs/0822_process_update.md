@@ -14,14 +14,16 @@ crosswalk key, while the exposure join itself uses `adm2_gid`.
 
 ### ADM1 finding
 
-Eighteen province codes covering 2,220 respondents have one-to-one GADM 3.6 ADM1
-candidates. Historical province code `03` requires the full district key: its 148
-respondents divide between present-day GADM Kampong Cham (70) and Tboung Khmum (78), a
-province created after survey fieldwork. Code `0904` covers eight respondents but conflicts
-with the documented survey coverage: its literal code indicates Khemara Phoumin in Koh
-Kong, while the coverage documentation indicates Stung Treng. **ADM1 candidate coverage is
-therefore 2,368/2,376 respondents (99.7%), with eight requiring the raw province name or
-manual review.**
+Eighteen of the 20 survey province codes map directly to one GADM 3.6 ADM1. The other two
+require special handling:
+
+| Survey field(s) | Respondents | ADM1 result |
+|---|---:|---|
+| `admin1=03` | 148 | Use `admin2` to assign 70 respondents to Kampong Cham and 78 to Tboung Khmum, which was created after the survey |
+| `admin1=09, admin2=04` | 8 | Unresolved: these clean-survey values correspond to Khemara Phoumin in Koh Kong. However, the official NIS Cambodia VACS metadata lists Stung Treng—not Koh Kong—among the 20 surveyed provinces. Confirm the original survey province name before assigning a GADM area |
+
+**ADM1 status: 2,368/2,376 respondents (99.7%) have a GADM 3.6 ADM1 candidate; eight
+remain unresolved.**
 
 ### ADM2 coverage bridge
 
