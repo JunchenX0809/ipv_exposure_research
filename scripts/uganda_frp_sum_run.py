@@ -1,11 +1,8 @@
 """One-off Uganda (2015) summed-FRP export — GADM 3.6, ADM2 + ADM1.
 
-Uganda is not (yet) in ``VACS_survey_time.csv`` (the team maintains the authoritative
-survey table on Dropbox), so the field start is taken **directly from the raw VACS
-microdata**: ``data/raw/Uganda/uganda2015_combined.sas7bdat``, variable ``hdate_vf``
-("Final Visit Date", YYYYMMDD). Across 5,804 valid interview dates the fieldwork ran
-2015-09-01 .. 2015-12-19, so field start = ``2015-09-01``. The exposure window is the
-12 calendar months before field start (resolved by the same helper the fleet uses):
+The field start below is approved study-timing metadata; this script does not read or
+require respondent-level records. The exposure window is the 12 calendar months before
+field start (resolved by the same helper the fleet uses):
 ``2014-09-01 .. 2015-08-31`` -> Sep 2014 through Aug 2015 (filename year 2015).
 
 This deliberately does NOT match the teammate's ``Uganda_2015.csv``, which anchored on
@@ -34,7 +31,7 @@ from utils.vacs_survey_time import exposure_window_inclusive_before_field_start
 ROOT = Path(__file__).resolve().parents[1]
 ISO3, VERSION = "UGA", "36"
 ADM0_NAME, ADM0_PCODE, SLUG = "Uganda", "UG", "uganda"
-FIELD_START = date(2015, 9, 1)  # min hdate_vf in uganda2015_combined.sas7bdat
+FIELD_START = date(2015, 9, 1)  # Approved project-level field-start metadata.
 
 
 def main() -> None:

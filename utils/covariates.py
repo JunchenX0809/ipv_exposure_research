@@ -1,6 +1,7 @@
 """
-Covariate codebook helpers: auto-scan .dta labels for covariate candidates,
-classify variable types, and build the 5-column harmonized DataFrame.
+Covariate codebook helpers: scan researcher-provided variable labels for
+covariate candidates, classify variable types, and build the 5-column
+harmonized DataFrame.
 
 The covariate mapping is owned by the notebook author; this module provides
 scanning heuristics and output formatting.
@@ -147,27 +148,27 @@ def _label_matches(label: str | None, patterns: list[str]) -> bool:
     return any(re.search(p, label, re.IGNORECASE) for p in patterns)
 
 
-def search_dta_for_covariates(
+def search_variable_labels_for_covariates(
     df: pd.DataFrame,
-    meta,
+    labels: Mapping[str, str],
     *,
     categories: Sequence[tuple[str, list[str]]] | None = None,
 ) -> pd.DataFrame:
     """
-    Scan Stata variable labels for keyword hits against each covariate category.
+    Scan approved variable-label metadata for keyword hits by covariate category.
 
-    Returns a DataFrame with columns: category, column, stata_label, dtype,
+    Returns a DataFrame with columns: category, column, source_label, dtype,
     nunique. One row per (category, matching column) pair; categories with
     no matches get a stub row.
     """
     cats = categories or COVARIATE_CATEGORIES
-    labels: dict[str, str] = dict(meta.column_names_to_labels or {})
+    label_map = dict(labels)
     rows: list[dict] = []
 
     for cat_name, patterns in cats:
         hits: list[str] = []
         for col in df.columns:
-            lab = labels.get(col, "")
+            lab = label_map.get(col, "")
             if _label_matches(lab, patterns):
                 hits.append(col)
 
@@ -175,7 +176,7 @@ def search_dta_for_covariates(
             rows.append({
                 "category": cat_name,
                 "column": "",
-                "stata_label": "— no match —",
+                "source_label": "— no match —",
                 "dtype": "",
                 "nunique": pd.NA,
             })
@@ -184,7 +185,7 @@ def search_dta_for_covariates(
                 rows.append({
                     "category": cat_name,
                     "column": col,
-                    "stata_label": labels.get(col, ""),
+                    "source_label": label_map.get(col, ""),
                     "dtype": str(df[col].dtype),
                     "nunique": int(df[col].nunique()),
                 })

@@ -1,9 +1,7 @@
 """One-off Uganda (2015) VIIRS VNP14A1 export — GADM 3.6, ADM2 + ADM1.
 
-Uganda is not in ``VACS_survey_time.csv`` (team keeps the authoritative survey table on
-Dropbox), so the field start comes from the raw microdata
-``data/raw/Uganda/uganda2015_combined.sas7bdat`` (``hdate_vf`` min = 2015-09-01; fieldwork
-2015-09-01..2015-12-19, n=5804). Exposure window = 12 calendar months before field start =
+The field start below is approved study-timing metadata; this script does not read or
+require respondent-level records. Exposure window = 12 calendar months before field start =
 ``2014-09-01 .. 2015-08-31`` (Sep 2014 - Aug 2015, filename year 2015). This matches the
 Uganda summed-FRP run (``scripts/uganda_frp_sum_run.py``). VIIRS coverage starts 2012-01-19,
 so this window is fully covered.
@@ -31,7 +29,7 @@ from utils.vacs_survey_time import exposure_window_inclusive_before_field_start
 ROOT = Path(__file__).resolve().parents[1]
 ISO3, VERSION = "UGA", "36"
 ADM0_NAME, ADM0_PCODE, SLUG = "Uganda", "UG", "uganda"
-FIELD_START = date(2015, 9, 1)  # min hdate_vf in uganda2015_combined.sas7bdat
+FIELD_START = date(2015, 9, 1)  # Approved project-level field-start metadata.
 
 
 def main() -> None:

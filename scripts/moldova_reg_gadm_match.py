@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Compare Moldova PUD ``reg`` values to GADM 3.6 ADM1 names (after GeoJSON conversion)."""
+"""Compare approved Moldova region labels to GADM 3.6 ADM1 names.
+
+The input must be a non-sensitive CSV containing only the distinct geography
+labels approved for linkage.
+"""
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 import unicodedata
 from pathlib import Path
 
 import pandas as pd
-import pyreadstat
-
 _REPO = Path(__file__).resolve().parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
@@ -27,7 +30,7 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", s)
 
 
-# PUD abbreviations that do not prefix-match GADM after accent strip
+# Source abbreviations that do not prefix-match GADM after accent strip
 _REG_MANUAL: dict[str, str] = {
     "balti": "Bălţi",
     "chisin": "Chişinău",
@@ -43,24 +46,38 @@ _REG_MANUAL: dict[str, str] = {
     "vulcan": "Găgăuzia",
 }
 
-# reg values where PUD label may be sub-ADM1 (locality) but mapped to ADM1 for GADM join
+# Labels that may be sub-ADM1 (locality) but are mapped to ADM1 for GADM join.
 _REG_NOTES: dict[str, str] = {
     "vulcan": (
-        "PUD reg likely Vulcănești/Vulcanesti (locality in Găgăuzia); mapped to GADM ADM1 "
-        "Găgăuzia — raw survey geography may mix ADM1 and sub-ADM1 labels."
+        "Vulcănești/Vulcanesti is a locality in Găgăuzia; mapped to GADM ADM1 "
+        "Găgăuzia because the approved labels may mix ADM1 and sub-ADM1 geography."
     ),
 }
 
 
-def main() -> None:
-    root = find_repo_root()
-    pud = root / "data" / "raw" / "Moldova Stata" / "MOLDOVA_VACS_2013_PUD.dta"
-    if not pud.is_file():
-        raise SystemExit(f"Missing PUD: {pud}")
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--labels-csv",
+        required=True,
+        type=Path,
+        help="Non-sensitive CSV containing distinct approved geography labels.",
+    )
+    parser.add_argument("--label-column", default="reg")
+    parser.add_argument("--output", type=Path)
+    return parser.parse_args()
 
-    df, _ = pyreadstat.read_dta(pud)
-    reg_vals = sorted(df["reg"].dropna().astype(str).unique())
-    print(f"PUD reg: {len(reg_vals)} distinct values, {len(df):,} rows\n")
+
+def main() -> None:
+    args = _parse_args()
+    root = find_repo_root()
+    labels_csv = args.labels_csv.expanduser().resolve()
+    if not labels_csv.is_file():
+        raise SystemExit(f"Missing labels CSV: {labels_csv}")
+    df = pd.read_csv(labels_csv, dtype=str, usecols=[args.label_column])
+    labels = df[args.label_column].dropna().str.strip()
+    reg_vals = sorted(labels.loc[labels.ne("")].unique())
+    print(f"Approved region labels: {len(reg_vals)} distinct values\n")
 
     adm1 = load_gadm_geojson("MDA", 1, version="36", root=root)
     gadm_names = sorted(
@@ -112,7 +129,7 @@ def main() -> None:
     matched_gadm = {g for _, g in exact} | {g for _, g in fuzzy}
     extra_gadm = [n for n in gadm_names if n not in matched_gadm]
     if extra_gadm:
-        print(f"\nGADM ADM1 with no PUD reg match ({len(extra_gadm)}):")
+        print(f"\nGADM ADM1 with no source-label match ({len(extra_gadm)}):")
         for n in extra_gadm:
             print(f"  {n!r}")
 
@@ -124,7 +141,10 @@ def main() -> None:
             "notes": _REG_NOTES.get(_norm(r), ""),
         }
 
-    out = root / "data" / "processed" / "moldova_reg_to_gadm36_adm1.csv"
+    out = args.output or (
+        root / "data" / "processed" / "moldova_reg_to_gadm36_adm1.csv"
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
     rows = [_row(r, g, "exact") for r, g in exact]
     rows += [_row(r, g, "fuzzy") for r, g in fuzzy]
     rows += [_row(r, "", "unmatched") for r, _ in unmatched_reg]

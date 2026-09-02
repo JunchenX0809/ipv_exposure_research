@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Compare Lesotho PUD ``District`` values to GADM 3.6 ADM1 names / codes.
+"""Compare approved Lesotho district labels to GADM 3.6 ADM1 names / codes.
 
 Mirrors ``scripts/moldova_reg_gadm_match.py``. Lesotho has no GADM ADM2, and the
-VACS PUD only carries the 10 districts (ADM1), so survey<->exposure linkage is a
-district -> GADM ``ID_1`` crosswalk. Writes ``data/processed/lesotho_district_to_gadm36_adm1.csv``.
+input labels represent the 10 districts (ADM1), so the result is a district ->
+GADM ``ID_1`` crosswalk. The input must be a non-sensitive CSV containing only
+the distinct geography labels approved for linkage.
 """
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 import unicodedata
@@ -31,27 +33,39 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", s)
 
 
-# PUD spellings that do not normalize-match GADM (same district, alternate spelling)
+# Source spellings that do not normalize-match GADM (same district, alternate spelling)
 _DISTRICT_MANUAL: dict[str, str] = {
-    "bothabotha": "Butha-Buthe",  # PUD "Botha-Botha" == GADM "Butha-Buthe" (LSO.2_1)
+    "bothabotha": "Butha-Buthe",  # "Botha-Botha" == GADM "Butha-Buthe" (LSO.2_1)
 }
 
 _DISTRICT_NOTES: dict[str, str] = {
-    "bothabotha": "PUD 'Botha-Botha' is an alternate spelling of GADM 'Butha-Buthe'.",
+    "bothabotha": "'Botha-Botha' is an alternate spelling of GADM 'Butha-Buthe'.",
 }
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--labels-csv",
+        required=True,
+        type=Path,
+        help="Non-sensitive CSV containing distinct approved geography labels.",
+    )
+    parser.add_argument("--label-column", default="District")
+    parser.add_argument("--output", type=Path)
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = _parse_args()
     root = find_repo_root()
-    pud = root / "data" / "raw" / "Lesotho Stata" / "LESOTHO_VACS_2018_PUD_UR.dta"
-    if not pud.is_file():
-        raise SystemExit(f"Missing PUD: {pud}")
-
-    import pyreadstat
-
-    df, _ = pyreadstat.read_dta(pud)
-    dist_vals = sorted(df["District"].dropna().astype(str).unique())
-    print(f"PUD District: {len(dist_vals)} distinct values, {len(df):,} rows\n")
+    labels_csv = args.labels_csv.expanduser().resolve()
+    if not labels_csv.is_file():
+        raise SystemExit(f"Missing labels CSV: {labels_csv}")
+    df = pd.read_csv(labels_csv, dtype=str, usecols=[args.label_column])
+    labels = df[args.label_column].dropna().str.strip()
+    dist_vals = sorted(labels.loc[labels.ne("")].unique())
+    print(f"Approved district labels: {len(dist_vals)} distinct values\n")
 
     adm1 = load_gadm_geojson("LSO", 1, version="36", root=root)
     gadm = [
@@ -92,7 +106,7 @@ def main() -> None:
     matched = {g for _, g in exact} | {g for _, g in fuzzy}
     extra = [n for n in gadm_names if n not in matched]
     if extra:
-        print(f"\nGADM ADM1 with no PUD District match ({len(extra)}): {extra}")
+        print(f"\nGADM ADM1 with no source district match ({len(extra)}): {extra}")
 
     def _row(d: str, g: str, match_type: str) -> dict[str, str]:
         return {
@@ -107,7 +121,10 @@ def main() -> None:
     rows += [_row(d, g, "manual") for d, g in fuzzy]
     rows += [_row(d, "", "unmatched") for d in unmatched]
 
-    out = root / "data" / "processed" / "lesotho_district_to_gadm36_adm1.csv"
+    out = args.output or (
+        root / "data" / "processed" / "lesotho_district_to_gadm36_adm1.csv"
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).sort_values("district").to_csv(out, index=False)
     print(f"\nWrote crosswalk: {out}")
 

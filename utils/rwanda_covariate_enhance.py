@@ -1,5 +1,6 @@
 """
-Rwanda 2015–16 covariate codebook: question text and formats from Stata .dta.
+Rwanda 2015–16 covariate codebook: question text and formats from approved
+variable-label metadata.
 
 Formats use ``code=meaning`` pairs when value labels or curated maps exist;
 otherwise observed numeric codes only (no invented meanings).
@@ -20,7 +21,7 @@ MANUAL_QUESTIONS: dict[str, str] = {
 
 
 def question_from_label(col: str, meta) -> str:
-    """Full question text from Stata variable label, with manual overrides."""
+    """Full question text from source variable labels, with manual overrides."""
     if col in MANUAL_QUESTIONS:
         return MANUAL_QUESTIONS[col]
     labels = meta.column_names_to_labels or {}

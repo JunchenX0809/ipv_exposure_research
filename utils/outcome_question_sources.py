@@ -2,8 +2,8 @@
 Country-specific outcome question extraction helpers.
 
 These helpers keep the orchestration in country scripts while sharing the
-boring parts: PDF parsing, aligned Excel-codebook parsing, light PUD checks,
-and TSV/DOCX export.
+boring parts: PDF parsing, aligned Excel-codebook parsing, label-script parsing,
+and TSV/DOCX export. They intentionally do not read respondent-level datasets.
 """
 
 from __future__ import annotations
@@ -15,11 +15,6 @@ from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 import pandas as pd
-
-try:
-    import pyreadstat
-except ImportError:  # pragma: no cover - scripts report this clearly.
-    pyreadstat = None  # type: ignore[assignment]
 
 from utils.docx_export import export_minimal_codebook_docx
 from utils.pdf_parse import CodebookEntry, extract_codebook_entries, extract_questionnaire_questions
@@ -34,7 +29,7 @@ QUESTION_RESPONSE_COLUMNS: Sequence[str] = (
     "Variable",
     "Format",
     "Questions",
-    "PUDStatus",
+    "SourceStatus",
 )
 
 
@@ -45,14 +40,6 @@ class SourceSpec:
     instrument: str
     path: Path
     source_type: str
-
-
-@dataclass(frozen=True)
-class PudSpec:
-    """One PUD used only for light variable-existence checks."""
-
-    label: str
-    path: Path
 
 
 def _project_root() -> Path:
@@ -99,7 +86,7 @@ def _row(
     variable: str = "",
     fmt: str = "",
     question: str = "",
-    pud_status: str = "",
+    source_status: str = "",
 ) -> dict[str, str]:
     return {
         "Country": country,
@@ -110,46 +97,8 @@ def _row(
         "Variable": variable,
         "Format": fmt,
         "Questions": question,
-        "PUDStatus": pud_status,
+        "SourceStatus": source_status,
     }
-
-
-def _collect_pud_columns(puds: Sequence[PudSpec]) -> dict[str, set[str]]:
-    """Read only DTA metadata and return available columns by PUD label."""
-    if not puds or pyreadstat is None:
-        return {}
-    out: dict[str, set[str]] = {}
-    for pud in puds:
-        try:
-            _, meta = pyreadstat.read_dta(str(pud.path), metadataonly=True)
-        except Exception as exc:  # pragma: no cover - reported in output.
-            try:
-                _, meta = pyreadstat.read_dta(str(pud.path), metadataonly=True, encoding="latin1")
-            except Exception:
-                out[pud.label] = {f"__ERROR__:{exc}"}
-                continue
-        out[pud.label] = set(meta.column_names)
-    return out
-
-
-def _pud_status(variable: str, pud_columns: Mapping[str, set[str]]) -> str:
-    if not variable or not pud_columns:
-        return ""
-    present: list[str] = []
-    missing: list[str] = []
-    for label, columns in pud_columns.items():
-        if any(c.startswith("__ERROR__:") for c in columns):
-            missing.append(f"{label}: metadata read failed")
-        elif variable in columns:
-            present.append(label)
-        else:
-            missing.append(label)
-    parts: list[str] = []
-    if present:
-        parts.append("present in " + ", ".join(present))
-    if missing:
-        parts.append("missing in " + ", ".join(missing))
-    return "; ".join(parts)
 
 
 def parse_questionnaire_source(
@@ -172,8 +121,6 @@ def parse_questionnaire_source(
 def parse_codebook_source(
     country: str,
     source: SourceSpec,
-    *,
-    pud_columns: Mapping[str, set[str]],
 ) -> list[dict[str, str]]:
     entries = extract_codebook_entries(source.path)
     rows: list[dict[str, str]] = []
@@ -191,7 +138,6 @@ def parse_codebook_source(
                 variable=variable,
                 fmt=fmt,
                 question=question,
-                pud_status=_pud_status(variable, pud_columns),
             )
         )
     return rows
@@ -215,8 +161,6 @@ def _parse_xlsx_response_cell(value: object) -> tuple[str, str] | None:
 def parse_aligned_xlsx_source(
     country: str,
     source: SourceSpec,
-    *,
-    pud_columns: Mapping[str, set[str]],
 ) -> list[dict[str, str]]:
     """Parse aligned VACS Excel codebook blocks used by Namibia/Zimbabwe."""
     try:
@@ -266,7 +210,6 @@ def parse_aligned_xlsx_source(
                         variable=variable,
                         fmt=fmt,
                         question=question,
-                        pud_status=_pud_status(variable, pud_columns),
                     )
                 )
     finally:
@@ -297,54 +240,18 @@ def run_pdf_first_country(
     questionnaire_sources: Sequence[SourceSpec],
     codebook_sources: Sequence[SourceSpec] = (),
     aligned_xlsx_sources: Sequence[SourceSpec] = (),
-    puds: Sequence[PudSpec] = (),
 ) -> pd.DataFrame:
-    """Run one country script's PDF-first extraction and export outputs."""
-    pud_columns = _collect_pud_columns(puds)
+    """Run one country's approved-document extraction and export outputs."""
     rows: list[dict[str, str]] = []
     for source in questionnaire_sources:
         rows.extend(parse_questionnaire_source(country, source))
     for source in codebook_sources:
-        rows.extend(parse_codebook_source(country, source, pud_columns=pud_columns))
+        rows.extend(parse_codebook_source(country, source))
     for source in aligned_xlsx_sources:
-        rows.extend(parse_aligned_xlsx_source(country, source, pud_columns=pud_columns))
+        rows.extend(parse_aligned_xlsx_source(country, source))
     df = rows_to_df(rows)
     export_question_response_table(df, slug)
     return df
-
-
-def _format_value_labels(meta: object, variable: str) -> str:
-    variable_to_label = getattr(meta, "variable_to_label", {}) or {}
-    value_labels = getattr(meta, "value_labels", {}) or {}
-    label_name = variable_to_label.get(variable)
-    label_map = value_labels.get(label_name, {}) if label_name else {}
-    if not label_map:
-        return ""
-    return ", ".join(f"{code}-{label}" for code, label in label_map.items())
-
-
-def rows_from_dta_labels(country: str, source: SourceSpec) -> list[dict[str, str]]:
-    if pyreadstat is None:
-        return [_row(country=country, source=source, question="pyreadstat is not installed; DTA skipped.")]
-    _, meta = pyreadstat.read_dta(str(source.path), metadataonly=True)
-    label_map = getattr(meta, "column_names_to_labels", {}) or {}
-    rows: list[dict[str, str]] = []
-    for variable in meta.column_names:
-        label = (label_map.get(variable) or "").strip()
-        fmt = _format_value_labels(meta, variable)
-        if label or fmt:
-            rows.append(
-                _row(
-                    country=country,
-                    source=source,
-                    question_number=variable,
-                    variable=variable,
-                    fmt=fmt,
-                    question=label,
-                    pud_status="present in DTA",
-                )
-            )
-    return rows
 
 
 def rows_from_sas_or_do(country: str, source: SourceSpec) -> list[dict[str, str]]:
@@ -372,16 +279,13 @@ def rows_from_sas_or_do(country: str, source: SourceSpec) -> list[dict[str, str]
     return rows
 
 
-def run_label_only_country(
+def run_label_script_country(
     *,
     country: str,
     slug: str,
-    dta_sources: Sequence[SourceSpec],
     script_sources: Sequence[SourceSpec],
 ) -> pd.DataFrame:
     rows: list[dict[str, str]] = []
-    for source in dta_sources:
-        rows.extend(rows_from_dta_labels(country, source))
     for source in script_sources:
         rows.extend(rows_from_sas_or_do(country, source))
     df = rows_to_df(rows)
