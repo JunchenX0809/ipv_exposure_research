@@ -18,3 +18,5 @@ data/
 tests/
 covariates_notebooks/
 indonesia_side_tasks/
+
+output/
